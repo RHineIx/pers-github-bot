@@ -1,0 +1,4 @@
+/.env
+/bot_data.db
+/bot_secret.key
+/__pycache__
