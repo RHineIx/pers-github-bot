@@ -9,7 +9,7 @@ from bot.database import DatabaseManager
 from github.api import GitHubAPI
 from bot.monitor import RepositoryMonitor
 from bot.handlers import BotHandlers
-from bot.summarizer import AISummarizer # Import the new class
+from bot.summarizer import AISummarizer
 
 # --- Logging Configuration ---
 logging.basicConfig(

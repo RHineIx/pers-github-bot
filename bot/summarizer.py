@@ -2,6 +2,7 @@
 import logging
 import google.generativeai as genai
 from typing import Optional, List
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,8 @@ class AISummarizer:
         if not api_key:
             raise ValueError("Gemini API key is not provided.")
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        logger.info(f"Initializing Gemini with model: {config.GEMINI_MODEL_NAME}")
+        self.model = genai.GenerativeModel(config.GEMINI_MODEL_NAME)
 
     async def summarize_readme(self, readme_content: str) -> Optional[str]:
         """
@@ -21,7 +23,7 @@ class AISummarizer:
         if not readme_content or len(readme_content) < 50:
             return None # Don't summarize very short or empty READMEs
 
-        # The "Smart Prompt" we designed
+        # The "Smart Prompt"
         prompt = f"""
 You are a senior software developer.
 

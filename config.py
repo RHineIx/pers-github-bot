@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 # Load environment variables from the .env file
 load_dotenv()
 
-
 class Config:
     """
     Application configuration class.
@@ -16,9 +15,10 @@ class Config:
 
     # --- Telegram Bot Settings ---
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+
+    # Gemini API  Key https://aistudio.google.com/apikey
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-
-
+    GEMINI_MODEL_NAME: str = "gemini-2.5-flash-preview-05-20"
 
     # --- GitHub API Settings ---
     GITHUB_API_BASE: str = "https://api.github.com"
