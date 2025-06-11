@@ -20,6 +20,10 @@ class Config:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL_NAME: str = "gemini-2.5-flash-preview-05-20"
 
+    # --- NEW: Define the Bot Owner's User ID ---
+    # The default of 0 is an invalid ID, ensuring the bot is locked if not set.
+    OWNER_USER_ID: int = int(os.getenv("OWNER_USER_ID", 0))
+
     # --- GitHub API Settings ---
     GITHUB_API_BASE: str = "https://api.github.com"
     # Note: GITHUB_TOKEN is now managed via the database, not from .env

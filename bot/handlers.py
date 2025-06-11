@@ -27,21 +27,29 @@ class BotHandlers:
         self.summarizer = summarizer
 
     def register_handlers(self):
-        self.bot.message_handler(commands=["start", "help"])(self.handle_help) # Merged start and help
-        self.bot.message_handler(commands=["settoken"])(self.handle_set_token)
-        self.bot.message_handler(commands=["removetoken"])(self.handle_remove_token)
-        self.bot.message_handler(commands=["status"])(self.handle_status)
-        self.bot.message_handler(commands=["setinterval"])(self.handle_set_interval)
-        self.bot.message_handler(commands=["pause"])(self.handle_pause)
-        self.bot.message_handler(commands=["resume"])(self.handle_resume)
-        self.bot.message_handler(commands=["add_dest"])(self.handle_add_destination)
-        self.bot.message_handler(commands=["remove_dest"])(self.handle_remove_destination)
-        self.bot.message_handler(commands=["list_dest"])(self.handle_list_destinations)
-        self.bot.inline_handler(lambda query: True)(self.handle_inline_query)
+        """
+        Registers all handlers with the TeleBot instance, protected by the IsOwnerFilter.
+        """
+        # Command Handlers
+        self.bot.message_handler(is_owner=True, commands=["start", "help"])(self.handle_help)
+        self.bot.message_handler(is_owner=True, commands=["settoken"])(self.handle_set_token)
+        # ... (all other command handlers remain the same)
+        self.bot.message_handler(is_owner=True, commands=["removetoken"])(self.handle_remove_token)
+        self.bot.message_handler(is_owner=True, commands=["status"])(self.handle_status)
+        self.bot.message_handler(is_owner=True, commands=["setinterval"])(self.handle_set_interval)
+        self.bot.message_handler(is_owner=True, commands=["pause"])(self.handle_pause)
+        self.bot.message_handler(is_owner=True, commands=["resume"])(self.handle_resume)
+        self.bot.message_handler(is_owner=True, commands=["add_dest"])(self.handle_add_destination)
+        self.bot.message_handler(is_owner=True, commands=["remove_dest"])(self.handle_remove_destination)
+        self.bot.message_handler(is_owner=True, commands=["list_dests"])(self.handle_list_destinations)
+
+        # Inline Mode Handler
+        self.bot.inline_handler(is_owner=True, func=lambda query: True)(self.handle_inline_query)
         logger.info("All message and query handlers registered.")
 
     async def handle_help(self, message: Message):
-        """Handles the /start and /help command."""
+        """Handles the /start and /help command, now with a custom message effect."""
+
         help_text = f"👋 **Hello, {message.from_user.first_name}!**\n\nHere are the available commands:\n\n"
         help_text += """
 📖 *Available Commands*
@@ -57,14 +65,23 @@ class BotHandlers:
 `/setinterval <seconds>` - Sets the check interval (min 60s).
 
 *Notification Destinations:*
-`/add_dest` - Adds your private chat (DM) as a destination.
-`/add_dest <ID>` - Adds a channel, group, or topic ID.
-`/remove_dest <ID>` - Removes a specific destination ID.
-`/remove_dest me` - Removes your DM as a destination.
-`/list_dests` - Shows all configured destinations.
+`/add_destination <ID>` - Adds a channel/group ID.
+`/remove_destination <ID>` - Removes a specific destination ID.
+`/remove_destination me` - Removes your DM as a destination.
+`/list_destinations` - Shows all configured destinations.
 """
-        await self.bot.reply_to(message, help_text, parse_mode="Markdown")
-
+        try:
+            await self.bot.reply_to(
+                message, 
+                help_text, 
+                parse_mode="Markdown",
+                message_effect_id=5046509860389126442 # 🎉
+            )
+        except Exception as e:
+            # Fallback to a normal message if the effect fails for any reason
+            logger.warning(f"Could not send message with effect, sending normally. Error: {e}")
+            await self.bot.reply_to(message, help_text, parse_mode="Markdown")
+        
     async def handle_pause(self, message: Message):
         await self.db_manager.set_monitoring_paused(True)
         await self.bot.reply_to(message, "⏸️ Monitoring has been paused.", parse_mode="Markdown")

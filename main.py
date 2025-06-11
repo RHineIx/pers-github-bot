@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from telebot.async_telebot import AsyncTeleBot
+from telebot.asyncio_filters import SimpleCustomFilter
 
 from config import config
 from bot.database import DatabaseManager
@@ -19,6 +20,16 @@ logging.basicConfig(
 logging.getLogger("telebot").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+
+# --- Custom filter to check if the user is the owner ---
+class IsOwnerFilter(SimpleCustomFilter):
+    key = 'is_owner'
+    async def check(self, message_or_query):
+        # Deny access if OWNER_USER_ID is not set
+        if config.OWNER_USER_ID == 0:
+            logger.error("OWNER_USER_ID is not set in .env! Bot will not respond to anyone.")
+            return False
+        return message_or_query.from_user.id == config.OWNER_USER_ID
 
 async def main():
     """
@@ -39,6 +50,8 @@ async def main():
             summarizer = AISummarizer(config.GEMINI_API_KEY)
         
         bot = AsyncTeleBot(config.BOT_TOKEN, parse_mode=config.PARSE_MODE)
+        # --- Register the custom filter ---
+        bot.add_custom_filter(IsOwnerFilter())
         
         # This is the line that was causing the error.
         # correctly passes the 'summarizer' object.
