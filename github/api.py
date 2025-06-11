@@ -3,6 +3,7 @@ import asyncio
 import time
 import logging
 from typing import Optional, Dict, Any, List
+import base64
 
 from config import config
 from bot.database import DatabaseManager
@@ -199,3 +200,26 @@ class GitHubAPI:
                     logger.error(f"An unexpected error occurred getting starred repos: {e}")
                     raise GitHubAPIError(500, str(e))
                 raise e
+            
+    async def get_readme(self, owner: str, repo: str) -> Optional[str]:
+        """
+        Fetches and decodes the content of a repository's README file.
+        Returns the decoded content as a string, or None if not found.
+        """
+        cache_key = f"readme:{owner}/{repo}"
+        if cached_data := self._check_cache(cache_key):
+            return cached_data
+
+        try:
+            readme_data = await self._make_request(f"repos/{owner}/{repo}/readme")
+            if readme_data and 'content' in readme_data:
+                # The content is Base64 encoded, so we need to decode it.
+                decoded_content = base64.b64decode(readme_data['content']).decode('utf-8')
+                self._update_cache(cache_key, decoded_content)
+                return decoded_content
+            return None
+        except GitHubAPIError as e:
+            if e.status_code == 404:
+                logger.info(f"No README file found for {owner}/{repo}.")
+                return None
+            raise e

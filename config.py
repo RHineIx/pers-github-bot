@@ -16,11 +16,13 @@ class Config:
 
     # --- Telegram Bot Settings ---
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+
 
     # --- GitHub API Settings ---
     GITHUB_API_BASE: str = "https://api.github.com"
     # Note: GITHUB_TOKEN is now managed via the database, not from .env
-
     # --- Bot Behavior Settings ---
     PARSE_MODE: str = "HTML"
     REQUEST_TIMEOUT: int = 30  # seconds

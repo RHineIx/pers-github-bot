@@ -6,6 +6,8 @@ from datetime import datetime
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import Message, InlineQueryResultArticle, InputTextMessageContent
 from telebot.apihelper import ApiTelegramException
+from bot.summarizer import AISummarizer # Add this import
+from typing import Optional # Add this import
 
 from config import config
 from bot.database import DatabaseManager
@@ -18,10 +20,11 @@ logger = logging.getLogger(__name__)
 
 class BotHandlers:
     # __init__ and register_handlers remain the same, but for completeness:
-    def __init__(self, bot: AsyncTeleBot, github_api: GitHubAPI, db_manager: DatabaseManager):
+    def __init__(self, bot: AsyncTeleBot, github_api: GitHubAPI, db_manager: DatabaseManager, summarizer: Optional[AISummarizer]):
         self.bot = bot
         self.github_api = github_api
         self.db_manager = db_manager
+        self.summarizer = summarizer
 
     def register_handlers(self):
         self.bot.message_handler(commands=["start", "help"])(self.handle_help) # Merged start and help
@@ -198,8 +201,14 @@ class BotHandlers:
         await self.bot.answer_inline_query(query.id, [help_result], cache_time=300)
 
     async def handle_inline_query(self, query: InlineQueryResultArticle):
+        """
+        Handles inline queries, now with AI summarization for the .repo command.
+        """
         query_text = query.query.strip()
-        if not query_text.startswith((".repo ", ".user ")): await self._show_inline_help(query); return
+        if not query_text.startswith((".repo ", ".user ")):
+            await self._show_inline_help(query)
+            return
+
         results = []
         try:
             if query_text.startswith(".repo "):
@@ -207,15 +216,51 @@ class BotHandlers:
                 parsed = URLParser.parse_repo_input(repo_input)
                 if parsed:
                     owner, repo_name = parsed
-                    repo_data, languages, latest_release = await asyncio.gather(self.github_api.get_repository(owner, repo_name), self.github_api.get_repository_languages(owner, repo_name), self.github_api.get_latest_release(owner, repo_name))
-                    if repo_data:
-                        preview_text = RepoFormatter.format_repository_preview(repo_data, languages, latest_release)
-                        results.append(InlineQueryResultArticle(id=f"repo_{owner}_{repo_name}", title=f"📦 {owner}/{repo_name}", description=repo_data.get("description", "")[:60], input_message_content=InputTextMessageContent(preview_text, parse_mode="HTML"), thumbnail_url=repo_data.get("owner", {}).get("avatar_url")))
+                    
+                    # --- MODIFIED: Fetch all data needed for a smart preview ---
+                    tasks = {
+                        "repo_data": self.github_api.get_repository(owner, repo_name),
+                        "languages": self.github_api.get_repository_languages(owner, repo_name),
+                        "latest_release": self.github_api.get_latest_release(owner, repo_name),
+                        "readme": self.github_api.get_readme(owner, repo_name)
+                    }
+                    task_results = await asyncio.gather(*tasks.values())
+                    res = dict(zip(tasks.keys(), task_results))
+
+                    if res["repo_data"]:
+                        # Generate AI summary if possible
+                        ai_summary = None
+                        if self.summarizer and res["readme"]:
+                            ai_summary = await self.summarizer.summarize_readme(res["readme"])
+                        
+                        # Format the preview using all available data
+                        preview_text = RepoFormatter.format_repository_preview(
+                            res["repo_data"], res["languages"], res["latest_release"], ai_summary
+                        )
+
+                        results.append(InlineQueryResultArticle(
+                            id=f"repo_{owner}_{repo_name}",
+                            title=f"📦 {owner}/{repo_name}",
+                            description=res["repo_data"].get("description", "")[:60],
+                            input_message_content=InputTextMessageContent(preview_text, parse_mode="HTML"),
+                            thumbnail_url=res["repo_data"].get("owner", {}).get("avatar_url")
+                        ))
+
             elif query_text.startswith(".user "):
                 username = query_text[6:]
                 user_data = await self.github_api.get_user(username)
                 if user_data:
                     info_text = UserFormatter.format_user_info(user_data)
-                    results.append(InlineQueryResultArticle(id=f"user_{username}", title=f"👤 {user_data.get('name', username)}", description=f"@{username} - {user_data.get('bio', '')[:50]}", input_message_content=InputTextMessageContent(info_text, parse_mode="HTML"), thumbnail_url=user_data.get("avatar_url")))
+                    results.append(InlineQueryResultArticle(
+                        id=f"user_{username}",
+                        title=f"👤 {user_data.get('name', username)}",
+                        description=f"@{username} - {user_data.get('bio', '')[:50]}",
+                        input_message_content=InputTextMessageContent(info_text, parse_mode="HTML"),
+                        thumbnail_url=user_data.get("avatar_url")
+                    ))
+            
+            # Answer with the results. This might take a few seconds for .repo queries.
             await self.bot.answer_inline_query(query.id, results, cache_time=10)
-        except Exception as e: logger.error(f"Error handling inline query: {e}", exc_info=True)
+
+        except Exception as e:
+            logger.error(f"Error handling inline query: {e}", exc_info=True)

@@ -36,20 +36,23 @@ class RepoFormatter:
     def format_repository_preview(
         repo_data: Dict[str, Any],
         languages: Optional[Dict[str, int]],
-        latest_release: Optional[Dict[str, Any]]
+        latest_release: Optional[Dict[str, Any]],
+        ai_summary: Optional[str] = None
     ) -> str:
-        """Formats the complete repository preview message."""
-        name = repo_data.get('name', 'N/A')
+        """Formats the preview, using AI summary if available, otherwise fallback to default."""
         full_name = repo_data.get('full_name', 'N/A')
-        description = repo_data.get('description', 'No description available.')
+        html_url = repo_data.get('html_url', '')
+
+        description = ai_summary if ai_summary else repo_data.get('description', 'No description available.')
+        
+        # ... rest of the data extraction is the same ...
         stars = RepoFormatter.format_number(repo_data.get('stargazers_count', 0))
         forks = RepoFormatter.format_number(repo_data.get('forks_count', 0))
         issues = repo_data.get('open_issues_count', 0)
-        html_url = repo_data.get('html_url', '')
-        topics = repo_data.get('topics', [])
         pushed_at = repo_data.get('pushed_at')
         last_updated_str = format_time_ago(pushed_at)
-
+        
+        # ... the rest of the function remains the same ...
         release_info = "No official releases"
         if latest_release:
             release_name = latest_release.get('tag_name', 'N/A')
@@ -62,12 +65,7 @@ class RepoFormatter:
             top_languages = sorted(lang_percentages.items(), key=lambda x: x[1], reverse=True)[:3]
             languages_text = " ".join([f"#{lang.replace('-', '_')} (<code>{percent:.1f}%</code>)" for lang, percent in top_languages])
 
-        topics_text = ""
-        if topics:
-            top_topics = topics[:3]
-            topics_text = " ".join([f"#{topic}" for topic in top_topics])
-
-        message = f"""📦 Repo: <a href='{html_url}'>{full_name}</a>
+        message = f"""📦 <a href='{html_url}'>{full_name}</a>
 
 📝 <b>Desc:</b>
 {description}
@@ -80,8 +78,7 @@ class RepoFormatter:
 💻 <b>Lang's:</b> {languages_text}
 
 <a href='{html_url}'>🔗 View on GitHub</a>
-
-{topics_text}"""
+"""
         return message.strip()
 
 

@@ -1,11 +1,13 @@
 import asyncio
 import logging
 from telebot.async_telebot import AsyncTeleBot
+from typing import Optional
 
 from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI, GitHubAPIError
 from github.formatter import RepoFormatter
+from bot.summarizer import AISummarizer # Add this import
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +18,11 @@ class RepositoryMonitor:
     and sends formatted notifications to all registered destinations.
     """
 
-    def __init__(self, bot: AsyncTeleBot, github_api: GitHubAPI, db_manager: DatabaseManager):
+    def __init__(self, bot: AsyncTeleBot, github_api: GitHubAPI, db_manager: DatabaseManager, summarizer: Optional[AISummarizer]):
         self.bot = bot
         self.github_api = github_api
         self.db_manager = db_manager
+        self.summarizer = summarizer
         self.is_monitoring = False
 
     async def start_monitoring(self):
@@ -110,62 +113,43 @@ class RepositoryMonitor:
             logger.error(f"Error during star checking process: {e}", exc_info=True)
 
     async def _send_notification(self, repo_data: dict):
-        """
-        Fetches full details for a repository, formats the message,
-        and sends it to all saved destinations.
-        """
         owner = repo_data.get("owner", {}).get("login")
         repo_name = repo_data.get("name")
-        
-        if not owner or not repo_name:
-            logger.error(f"Could not parse owner/repo from data: {repo_data.get('full_name')}")
-            return
+        if not owner or not repo_name: return
 
         try:
-            # Fetch supplementary data for a rich preview
-            full_repo_data_task = self.github_api.get_repository(owner, repo_name)
-            languages_task = self.github_api.get_repository_languages(owner, repo_name)
-            release_task = self.github_api.get_latest_release(owner, repo_name)
-            
-            # Run all API calls concurrently for speed
-            repo_details, languages, latest_release = await asyncio.gather(
-                full_repo_data_task, languages_task, release_task
+            # Fetch base details
+            repo_details, languages, latest_release, readme_content = await asyncio.gather(
+                self.github_api.get_repository(owner, repo_name),
+                self.github_api.get_repository_languages(owner, repo_name),
+                self.github_api.get_latest_release(owner, repo_name),
+                self.github_api.get_readme(owner, repo_name) # Fetch README
             )
 
-            if not repo_details:
-                logger.error(f"Failed to fetch full details for {owner}/{repo_name}")
-                return
+            if not repo_details: return
 
-            # Format the message using our formatter
+            # Generate AI summary if possible
+            ai_summary = None
+            if self.summarizer and readme_content:
+                ai_summary = await self.summarizer.summarize_readme(readme_content)
+
+            # Format the message with the AI summary
             message_text = RepoFormatter.format_repository_preview(
-                repo_details, languages, latest_release
+                repo_details, languages, latest_release, ai_summary
             )
-            
-            # Get all destinations and send the message
+
             destinations = await self.db_manager.get_all_destinations()
-            if not destinations:
-                logger.warning(f"New star found ({owner}/{repo_name}), but no notification destinations are set.")
-                return
+            if not destinations: return
 
             logger.info(f"Sending notification for {owner}/{repo_name} to {len(destinations)} destination(s).")
             for target in destinations:
                 try:
-                    chat_id = target
-                    thread_id = None
-                    if '/' in target:
-                        parts = target.split('/')
-                        chat_id = parts[0]
-                        thread_id = int(parts[1])
-
+                    chat_id, thread_id = (target.split('/')[0], int(target.split('/')[1])) if '/' in target else (target, None)
                     await self.bot.send_message(
-                        chat_id=chat_id,
-                        text=message_text,
-                        parse_mode=config.PARSE_MODE,
-                        disable_web_page_preview=False, # Show the repo link preview
-                        message_thread_id=thread_id,
+                        chat_id=chat_id, text=message_text, parse_mode=config.PARSE_MODE,
+                        disable_web_page_preview=False, message_thread_id=thread_id,
                     )
                 except Exception as e:
                     logger.error(f"Failed to send notification to destination {target}: {e}")
-
         except Exception as e:
             logger.error(f"Failed to process and send notification for {owner}/{repo_name}: {e}")
