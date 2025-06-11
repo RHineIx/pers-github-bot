@@ -2,15 +2,16 @@ import asyncio
 import logging
 from telebot.async_telebot import AsyncTeleBot
 from typing import Optional
+from telebot.types import InputMediaPhoto, InputMediaVideo
 
 from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI, GitHubAPIError
 from github.formatter import RepoFormatter
 from bot.summarizer import AISummarizer
+from bot.utils import extract_media_from_readme
 
 logger = logging.getLogger(__name__)
-
 
 class RepositoryMonitor:
     """
@@ -113,43 +114,65 @@ class RepositoryMonitor:
             logger.error(f"Error during star checking process: {e}", exc_info=True)
 
     async def _send_notification(self, repo_data: dict):
-        owner = repo_data.get("owner", {}).get("login")
-        repo_name = repo_data.get("name")
+        owner, repo_name = repo_data.get("owner", {}).get("login"), repo_data.get("name")
         if not owner or not repo_name: return
 
+        destinations = await self.db_manager.get_all_destinations()
+        if not destinations: return
+
+        logger.info(f"Processing notification for {owner}/{repo_name}...")
+
         try:
-            # Fetch base details
-            repo_details, languages, latest_release, readme_content = await asyncio.gather(
-                self.github_api.get_repository(owner, repo_name),
-                self.github_api.get_repository_languages(owner, repo_name),
-                self.github_api.get_latest_release(owner, repo_name),
-                self.github_api.get_readme(owner, repo_name) # Fetch README
-            )
+            tasks = {
+                "details": self.github_api.get_repository(owner, repo_name),
+                "languages": self.github_api.get_repository_languages(owner, repo_name),
+                "release": self.github_api.get_latest_release(owner, repo_name),
+                "readme": self.github_api.get_readme(owner, repo_name)
+            }
+            results = await asyncio.gather(*tasks.values())
+            res = dict(zip(tasks.keys(), results))
+            if not res["details"]: return
 
-            if not repo_details: return
-
-            # Generate AI summary if possible
             ai_summary = None
-            if self.summarizer and readme_content:
-                ai_summary = await self.summarizer.summarize_readme(readme_content)
+            if self.summarizer and res["readme"]:
+                ai_summary = await self.summarizer.summarize_readme(res["readme"])
 
-            # Format the message with the AI summary
-            message_text = RepoFormatter.format_repository_preview(
-                repo_details, languages, latest_release, ai_summary
+            caption_text = RepoFormatter.format_repository_preview(
+                res["details"], res["languages"], res["release"], ai_summary
             )
 
-            destinations = await self.db_manager.get_all_destinations()
-            if not destinations: return
+            media_group = []
+            selected_media_urls = []
+            if self.summarizer and res["readme"]:
+                all_media = extract_media_from_readme(
+                    res["readme"], owner, repo_name, res["details"].get("default_branch", "main")
+                )
+                if all_media:
+                    selected_media_urls = await self.summarizer.select_preview_media(res["readme"], all_media)
 
-            logger.info(f"Sending notification for {owner}/{repo_name} to {len(destinations)} destination(s).")
+            if selected_media_urls:
+                for i, url in enumerate(selected_media_urls):
+                    caption = caption_text if i == 0 else None
+                    if any(url.lower().endswith(ext) for ext in ['.mp4', '.mov', '.webm']):
+                        media_item = InputMediaVideo(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                    else: # Assume it's a photo/gif
+                        media_item = InputMediaPhoto(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                    media_group.append(media_item)
+
             for target in destinations:
                 try:
                     chat_id, thread_id = (target.split('/')[0], int(target.split('/')[1])) if '/' in target else (target, None)
-                    await self.bot.send_message(
-                        chat_id=chat_id, text=message_text, parse_mode=config.PARSE_MODE,
-                        disable_web_page_preview=False, message_thread_id=thread_id,
-                    )
+                    if media_group:
+                        logger.info(f"Sending media group to {target} for {owner}/{repo_name}.")
+                        await self.bot.send_media_group(chat_id=chat_id, media=media_group, message_thread_id=thread_id)
+                    else:
+                        logger.info(f"Sending text-only notification to {target} for {owner}/{repo_name}.")
+                        await self.bot.send_message(
+                            chat_id=chat_id, text=caption_text, parse_mode=config.PARSE_MODE,
+                            disable_web_page_preview=False, message_thread_id=thread_id
+                        )
                 except Exception as e:
                     logger.error(f"Failed to send notification to destination {target}: {e}")
+
         except Exception as e:
-            logger.error(f"Failed to process and send notification for {owner}/{repo_name}: {e}")
+            logger.error(f"Failed to process notification for {owner}/{repo_name}: {e}", exc_info=True)

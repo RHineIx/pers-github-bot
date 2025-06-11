@@ -1,5 +1,7 @@
 # bot/utils.py
+import re
 from datetime import datetime, timezone
+from typing import List
 
 def format_duration(seconds: int) -> str:
     """Formats a duration in seconds into a human-readable string."""
@@ -49,3 +51,43 @@ def format_time_ago(timestamp_str: str) -> str:
     else:
         years = int(seconds / 31536000)
         return f"{years} year{'s' if years > 1 else ''} ago"
+
+def extract_media_from_readme(
+    markdown_text: str, owner: str, repo: str, branch: str
+) -> List[str]:
+    """
+    Extracts and resolves all image and GIF URLs from README markdown text.
+    Converts relative URLs to absolute GitHub URLs.
+    """
+    if not markdown_text:
+        return []
+
+    # Regex to find Markdown images `![alt](url)` and HTML images `<img src="url">`
+    # It captures the URL part.
+    image_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]'
+    found_urls = re.findall(image_pattern, markdown_text)
+
+    # The regex returns tuples of capture groups, so we need to flatten the list
+    # and filter out empty matches.
+    urls = [url for group in found_urls for url in group if url]
+
+    absolute_urls = []
+    for url in urls:
+        url = url.strip()
+        # If the URL is already absolute, add it directly
+        if url.startswith('http://') or url.startswith('https://'):
+            absolute_urls.append(url)
+        # If the URL is a relative path, construct the full raw GitHub URL
+        else:
+            # Clean up relative path prefixes like './'
+            clean_path = url.lstrip('./').lstrip('/')
+            absolute_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{clean_path}"
+            absolute_urls.append(absolute_url)
+
+    # Filter for common image and GIF formats
+    valid_media_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.webm')
+    valid_urls = [
+        url for url in absolute_urls if url.lower().endswith(valid_media_extensions)
+    ]
+
+    return valid_urls
