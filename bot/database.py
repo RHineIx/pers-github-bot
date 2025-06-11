@@ -181,7 +181,7 @@ class DatabaseManager:
     
     async def set_monitoring_paused(self, paused: bool) -> None:
         """Sets the monitoring paused state in the database."""
-        # We store the boolean as "1" for True and "0" for False.
+        #store the boolean as "1" for True and "0" for False.
         value_to_store = "1" if paused else "0"
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute(

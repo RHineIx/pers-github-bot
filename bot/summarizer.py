@@ -67,7 +67,7 @@ Here is the README:
 
         **README Content:**
         ---
-        {readme_content[:8000]}
+        {readme_content[:10000]}
         ---
 
         **Media URL List:**
@@ -82,7 +82,7 @@ Here is the README:
             # Clean up the response: remove whitespace and split by comma
             selected_urls = [url.strip() for url in response.text.strip().split(',') if url.strip()]
             logger.info(f"Gemini selected {len(selected_urls)} media URLs.")
-            return selected_urls[:3] # Ensure we don't exceed the max of 3
+            return selected_urls[:3] # Ensure don't exceed the max of 3
         except Exception as e:
             logger.error(f"Error during media selection with Gemini API: {e}")
             return []

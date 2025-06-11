@@ -67,12 +67,12 @@ class GitHubAPI:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = await self._get_headers()
 
-        # If no token is available, we cannot make authenticated requests.
+        # If no token is available, cannot make authenticated requests.
         if "Authorization" not in headers:
             logger.warning("Cannot make API request: GitHub token not found in database.")
             # Depending on the endpoint, some public data might be accessible,
-            # but for this bot, we assume most operations require a token.
-            # For simplicity, we can block here, or let it fail. Let's block.
+            # but for this bot, assume most operations require a token.
+            # For simplicity, can block here, or let it fail. Let's block.
             return None
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT)) as session:
@@ -146,7 +146,7 @@ class GitHubAPI:
             if e.status_code == 404:
                 logger.info(f"No releases found for {owner}/{repo}. Returning empty dict.")
                 return {}
-            # For other errors, we still want to raise them.
+            # For other errors, still want to raise them.
             raise e
 
     async def get_user(self, username: str) -> Optional[Dict[str, Any]]:

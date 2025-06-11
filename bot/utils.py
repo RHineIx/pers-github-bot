@@ -67,7 +67,7 @@ def extract_media_from_readme(
     image_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]'
     found_urls = re.findall(image_pattern, markdown_text)
 
-    # The regex returns tuples of capture groups, so we need to flatten the list
+    # The regex returns tuples of capture groups, so need to flatten the list
     # and filter out empty matches.
     urls = [url for group in found_urls for url in group if url]
 
