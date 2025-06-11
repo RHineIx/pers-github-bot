@@ -6,8 +6,8 @@ from datetime import datetime
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import Message, InlineQueryResultArticle, InputTextMessageContent
 from telebot.apihelper import ApiTelegramException
-from bot.summarizer import AISummarizer # Add this import
-from typing import Optional # Add this import
+from bot.summarizer import AISummarizer
+from typing import Optional
 
 from config import config
 from bot.database import DatabaseManager
@@ -83,7 +83,7 @@ class BotHandlers:
             if seconds < min_interval: await self.bot.reply_to(message, f"❌ Minimum interval is {min_interval} seconds."); return
             
             await self.db_manager.update_monitor_interval(seconds)
-            # --- MODIFIED: Use the helper function for a better reply ---
+            # --- Use the helper function for a better reply ---
             human_readable_duration = format_duration(seconds)
             await self.bot.reply_to(message, f"✅ Monitoring interval set to *{human_readable_duration}*.", parse_mode="Markdown")
         except ValueError: await self.bot.reply_to(message, "❌ Please enter a valid number.")
@@ -98,7 +98,7 @@ class BotHandlers:
             user_data = await self.github_api.get_authenticated_user()
             if not user_data or 'login' not in user_data: raise GitHubAPIError(401, "Invalid token")
             
-            # --- MODIFIED: Clear any past errors on successful token set ---
+            # --- Clear any past errors on successful token set ---
             await self.db_manager.clear_last_error()
             await self.db_manager.set_monitoring_paused(False) # Also resume monitoring
 
@@ -217,7 +217,7 @@ class BotHandlers:
                 if parsed:
                     owner, repo_name = parsed
                     
-                    # --- MODIFIED: Fetch all data needed for a smart preview ---
+                    # --- Fetch all data needed for a smart preview ---
                     tasks = {
                         "repo_data": self.github_api.get_repository(owner, repo_name),
                         "languages": self.github_api.get_repository_languages(owner, repo_name),

@@ -8,10 +8,6 @@ from telebot import types
 from telebot.util import quick_markup
 from bot.utils import format_time_ago
 
-# We will create a simplified version of CallbackDataManager later in bot/utils.py
-# For now, this import is a placeholder for the code to be valid.
-# from bot.utils import CallbackDataManager
-
 class RepoFormatter:
     """Formats repository data for Telegram messages."""
 
@@ -68,7 +64,7 @@ class RepoFormatter:
         message = f"""📦 <a href='{html_url}'>{full_name}</a>
 
 📝 <b>Desc:</b>
-{description}
+<blockquote expandable>{description}</blockquote>
 
 <blockquote>⭐ Stars: <b>{stars}</b> | 🍴 Forks: <b>{forks}</b> | 🪲 Open Issues: <b>{issues}</b></blockquote>
 

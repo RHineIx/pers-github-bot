@@ -31,10 +31,5 @@ class Config:
     # --- Monitoring Settings ---
     MONITOR_INTERVAL_SECONDS: int = 300  # Check for new stars every 5 minutes
 
-    # --- Download Settings (for inline mode and future features) ---
-    MAX_DOWNLOAD_SIZE_MB: int = 50
-    ITEMS_PER_PAGE: int = 5
-
-
 # Create a global config instance to be used throughout the application
 config = Config()

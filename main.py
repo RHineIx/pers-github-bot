@@ -41,13 +41,11 @@ async def main():
         bot = AsyncTeleBot(config.BOT_TOKEN, parse_mode=config.PARSE_MODE)
         
         # This is the line that was causing the error.
-        # It now correctly passes the 'summarizer' object.
+        # correctly passes the 'summarizer' object.
         handlers = BotHandlers(bot, github_api, db_manager, summarizer)
         handlers.register_handlers()
         
-        # The monitor also needs the summarizer object
         monitor = RepositoryMonitor(bot, github_api, db_manager, summarizer)
-
         monitor_task = asyncio.create_task(monitor.start_monitoring())
 
         logger.info("Personal GitHub Stars Bot started successfully!")

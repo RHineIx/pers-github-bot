@@ -7,7 +7,7 @@ from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI, GitHubAPIError
 from github.formatter import RepoFormatter
-from bot.summarizer import AISummarizer # Add this import
+from bot.summarizer import AISummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class RepositoryMonitor:
             await self.db_manager.clear_last_error()
 
         except GitHubAPIError as e:
-            # --- NEW: Smart error handling for invalid tokens ---
+            # --- Smart error handling for invalid tokens ---
             if e.status_code == 401:
                 logger.error(f"GitHub token is invalid (401 Unauthorized). Pausing monitoring.")
                 # Pause monitoring automatically

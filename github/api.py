@@ -142,7 +142,7 @@ class GitHubAPI:
 
         except GitHubAPIError as e:
             # If the repo has no releases, GitHub returns a 404. This is normal.
-            # We return an empty dict to avoid causing TypeErrors downstream.
+            # return an empty dict to avoid causing TypeErrors downstream.
             if e.status_code == 404:
                 logger.info(f"No releases found for {owner}/{repo}. Returning empty dict.")
                 return {}
@@ -161,7 +161,7 @@ class GitHubAPI:
 
     async def get_authenticated_user(self) -> Optional[Dict[str, Any]]:
         """Gets the profile of the user authenticated by the stored token."""
-        # We don't cache this as it's mainly used for validation.
+        # don't cache this as it's mainly used for validation.
         return await self._make_request("user")
 
     async def get_rate_limit(self) -> Optional[Dict[str, Any]]:
@@ -213,7 +213,7 @@ class GitHubAPI:
         try:
             readme_data = await self._make_request(f"repos/{owner}/{repo}/readme")
             if readme_data and 'content' in readme_data:
-                # The content is Base64 encoded, so we need to decode it.
+                # The content is Base64 encoded, so need to decode it.
                 decoded_content = base64.b64decode(readme_data['content']).decode('utf-8')
                 self._update_cache(cache_key, decoded_content)
                 return decoded_content
