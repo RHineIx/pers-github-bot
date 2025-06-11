@@ -6,11 +6,11 @@ import re
 from typing import Dict, Any, Optional, List
 from telebot import types
 from telebot.util import quick_markup
+from bot.utils import format_time_ago
 
 # We will create a simplified version of CallbackDataManager later in bot/utils.py
 # For now, this import is a placeholder for the code to be valid.
 # from bot.utils import CallbackDataManager
-
 
 class RepoFormatter:
     """Formats repository data for Telegram messages."""
@@ -47,6 +47,8 @@ class RepoFormatter:
         issues = repo_data.get('open_issues_count', 0)
         html_url = repo_data.get('html_url', '')
         topics = repo_data.get('topics', [])
+        pushed_at = repo_data.get('pushed_at')
+        last_updated_str = format_time_ago(pushed_at)
 
         release_info = "No official releases"
         if latest_release:
@@ -65,15 +67,17 @@ class RepoFormatter:
             top_topics = topics[:3]
             topics_text = " ".join([f"#{topic}" for topic in top_topics])
 
-        message = f"""📦 <a href='{html_url}'>{full_name}</a>
+        message = f"""📦 Repo: <a href='{html_url}'>{full_name}</a>
 
-📝 <b>Description:</b>
+📝 <b>Desc:</b>
 {description}
 
 <blockquote>⭐ Stars: <b>{stars}</b> | 🍴 Forks: <b>{forks}</b> | 🪲 Open Issues: <b>{issues}</b></blockquote>
 
 🚀 <b>Latest Release:</b> {release_info}
-💻 <b>Languages:</b> {languages_text}
+⏳ <b>Last updated:</b> {last_updated_str}
+
+💻 <b>Lang's:</b> {languages_text}
 
 <a href='{html_url}'>🔗 View on GitHub</a>
 

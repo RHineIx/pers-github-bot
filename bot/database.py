@@ -178,3 +178,49 @@ class DatabaseManager:
             if result:
                 return int(result[0])
         return None
+    
+    async def set_monitoring_paused(self, paused: bool) -> None:
+        """Sets the monitoring paused state in the database."""
+        # We store the boolean as "1" for True and "0" for False.
+        value_to_store = "1" if paused else "0"
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)",
+                ("monitoring_paused", value_to_store),
+            )
+            await conn.commit()
+        logger.info(f"Monitoring paused state set to: {paused}")
+
+    async def is_monitoring_paused(self) -> bool:
+        """Checks if monitoring is currently paused, returning False by default."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute(
+                "SELECT value FROM bot_state WHERE key = ?", ("monitoring_paused",)
+            )
+            result = await cursor.fetchone()
+            # If the value is "1", it's paused. Otherwise, it's not.
+            return result[0] == "1" if result else False
+        
+    async def update_last_error(self, message: str) -> None:
+        """Stores the last critical error message."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)",
+                ("last_error_message", message),
+            )
+            await conn.commit()
+
+    async def get_last_error(self) -> Optional[str]:
+        """Retrieves the last critical error message."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute(
+                "SELECT value FROM bot_state WHERE key = ?", ("last_error_message",)
+            )
+            result = await cursor.fetchone()
+            return result[0] if result else None
+
+    async def clear_last_error(self) -> None:
+        """Clears the last critical error message."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM bot_state WHERE key = ?", ("last_error_message",))
+            await conn.commit()

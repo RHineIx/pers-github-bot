@@ -24,19 +24,22 @@ class RepositoryMonitor:
 
     async def start_monitoring(self):
         """
-        Starts the background monitoring loop. The loop dynamically fetches the
-        interval from the database, allowing for runtime changes.
+        Starts the background monitoring loop. The loop first checks if
+        monitoring is paused before proceeding with any API calls.
         """
         self.is_monitoring = True
         logger.info("Repository monitoring service started.")
 
         while self.is_monitoring:
             try:
-                if await self.db_manager.token_exists():
+                if await self.db_manager.is_monitoring_paused():
+                    logger.info("Monitoring is paused. Skipping this check cycle.")
+                
+                elif await self.db_manager.token_exists():
                     await self._check_for_new_stars()
                 else:
                     logger.debug("No GitHub token found. Skipping monitoring cycle.")
-                
+
                 # Fetch interval from DB, or use the default from config if not set
                 interval_seconds = await self.db_manager.get_monitor_interval()
                 if not interval_seconds or interval_seconds < 60:
@@ -56,60 +59,53 @@ class RepositoryMonitor:
 
     async def _check_for_new_stars(self):
         """
-        The core logic for checking for new stars using timestamps for accuracy.
-        This method is robust against un-starring events.
+        The core logic for checking for new stars, with enhanced error handling
+        for invalid tokens.
         """
         logger.info("Checking for new starred repositories using timestamp method...")
         try:
-            # 1. Fetch the most recently starred repos with timestamp data
+            # This logic remains the same
             starred_events = await self.github_api.get_authenticated_user_starred_repos(page=1, per_page=50)
             if not starred_events:
                 logger.info("No starred repositories found or API error.")
                 return
 
-            # 2. Get the timestamp of the last repo we processed
             last_check_timestamp = await self.db_manager.get_last_check_timestamp()
-
-            # 3. Find all repos starred *after* our last check
             new_starred_repos = []
+
             if last_check_timestamp:
                 for event in starred_events:
-                    if event['starred_at'] > last_check_timestamp:
-                        new_starred_repos.append(event['repo'])
-                    else:
-                        # Since the list is sorted newest to oldest, we can stop
-                        # as soon as we see an event older than our last check.
-                        break
-            
-            # 4. Handle the initial run: just set the baseline
+                    if event['starred_at'] > last_check_timestamp: new_starred_repos.append(event['repo'])
+                    else: break
             else:
                 newest_timestamp = starred_events[0]['starred_at']
                 logger.info(f"This is the first run. Establishing baseline timestamp: {newest_timestamp}")
                 await self.db_manager.update_last_check_timestamp(newest_timestamp)
                 return
 
-            # 5. If new repos were found, process and notify
-            if not new_starred_repos:
+            if new_starred_repos:
+                logger.info(f"Found {len(new_starred_repos)} new starred repositories!")
+                new_starred_repos.reverse()
+                for repo_data in new_starred_repos:
+                    await self._send_notification(repo_data)
+            else:
                 logger.info("No new starred repositories found.")
-                # We still update the timestamp to the very latest one found
-                await self.db_manager.update_last_check_timestamp(starred_events[0]['starred_at'])
-                return
-            
-            logger.info(f"Found {len(new_starred_repos)} new starred repositories!")
-            
-            # Reverse to notify in the order they were starred (oldest first)
-            new_starred_repos.reverse()
 
-            for repo_data in new_starred_repos:
-                await self._send_notification(repo_data)
-            
-            # 6. Update the database with the timestamp of the newest repo found
-            # in this batch, making it the baseline for the next check.
-            latest_timestamp_in_batch = starred_events[0]['starred_at']
-            await self.db_manager.update_last_check_timestamp(latest_timestamp_in_batch)
+            await self.db_manager.update_last_check_timestamp(starred_events[0]['starred_at'])
+            # If the check was successful, clear any previous error state
+            await self.db_manager.clear_last_error()
 
         except GitHubAPIError as e:
-            logger.error(f"GitHub API error while checking for stars: {e}")
+            # --- NEW: Smart error handling for invalid tokens ---
+            if e.status_code == 401:
+                logger.error(f"GitHub token is invalid (401 Unauthorized). Pausing monitoring.")
+                # Pause monitoring automatically
+                await self.db_manager.set_monitoring_paused(True)
+                # Store the error message to be displayed in /status
+                error_msg = "Your GitHub token is invalid or has expired. Monitoring has been paused automatically. Please set a new token using /settoken."
+                await self.db_manager.update_last_error(error_msg)
+            else:
+                logger.error(f"A GitHub API error occurred while checking for stars: {e}")
         except Exception as e:
             logger.error(f"Error during star checking process: {e}", exc_info=True)
 
