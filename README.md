@@ -4,8 +4,6 @@
 A sophisticated, asynchronous Telegram bot designed to be your personal GitHub assistant.  
 It actively monitors your starred repositories and delivers intelligent, media-rich notifications to your chosen destinations, turning your star list into a powerful, curated feed of information.
 
-> يمكنك استبدال هذا الرابط بصورة من تصميمك للبوت
-
 ---
 
 ## ✨ Key Features
