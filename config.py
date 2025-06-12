@@ -10,6 +10,9 @@ class Config:
     # The bot will only respond to this user ID.
     OWNER_USER_ID: int = int(os.getenv("OWNER_USER_ID", 0))
 
+    # --- ID for the private error logging channel ---
+    LOG_CHANNEL_ID: str = os.getenv("LOG_CHANNEL_ID")
+
     # --- Gemini AI Settings ---
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     # Load model name from .env for flexibility. Fallback to a stable version.

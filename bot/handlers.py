@@ -41,7 +41,10 @@ class BotHandlers:
 
     def register_handlers(self):
         # Register all command and query handlers, protected by the owner filter.
-        
+
+        # --- Register the test log command ---
+        self.bot.message_handler(is_owner=True, commands=["testlog"])(self.handle_test_log)
+
         # Main Commands
         self.bot.message_handler(is_owner=True, commands=["start", "help"])(self.handle_help)
         self.bot.message_handler(is_owner=True, commands=["status"])(self.handle_status)
@@ -77,6 +80,7 @@ class BotHandlers:
 `/removetoken` - Deletes your token.
 `/status` - Shows bot status.
 `/pause` | `/resume` - Pause/Resume monitoring.
+`/testlog` - Sends a test message to the log channel.
 
 *Settings:*
 `/setinterval <seconds>` - Sets check interval.
@@ -95,6 +99,20 @@ class BotHandlers:
         except Exception as e:
             logger.warning(f"Could not send message with effect, sending normally. Error: {e}")
             await self.bot.reply_to(message, help_text, parse_mode="Markdown")
+
+    # --- test log command ---
+    async def handle_test_log(self, message: Message):
+        """Sends a test error message to the configured log channel."""
+        if not config.LOG_CHANNEL_ID:
+            await self.bot.reply_to(message, "The `LOG_CHANNEL_ID` is not configured in your `.env` file.")
+            return
+
+        try:
+            logger.error("This is a test error message sent via the /testlog command.")
+            await self.bot.reply_to(message, "✅ A test error log has been sent log channel.")
+        except Exception as e:
+            await self.bot.reply_to(message, f"❌ Failed to send test log. Error: {e}")
+
 
     async def handle_status(self, message: Message):
         # Shows a detailed status of the bot's current state.

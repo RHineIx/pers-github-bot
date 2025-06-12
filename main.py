@@ -11,12 +11,28 @@ from bot.monitor import RepositoryMonitor
 from bot.handlers import BotHandlers
 from bot.summarizer import AISummarizer
 from bot.scheduler import DigestScheduler
+from bot.telegram_log_handler import TelegramLogHandler
 
+# 1. --- Basic Logging Configuration ---
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s"
 )
 logging.getLogger("telebot").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# 2. --- Add Telegram Log Handler (if configured) ---
+if config.LOG_CHANNEL_ID:
+    # Create an instance of our custom handler
+    telegram_handler = TelegramLogHandler(token=config.BOT_TOKEN, channel_id=config.LOG_CHANNEL_ID)
+    # Set it to only send messages for ERROR level and above
+    telegram_handler.setLevel(logging.ERROR)
+    # Define a clear format for the log messages sent to Telegram
+    formatter = logging.Formatter('%(name)s:%(lineno)d - %(message)s')
+    telegram_handler.setFormatter(formatter)
+    # Add the handler to the root logger to catch errors from all modules
+    logging.getLogger("").addHandler(telegram_handler)
+    logger.info(f"TelegramLogHandler configured for channel {config.LOG_CHANNEL_ID}.")
+
 
 # --- Custom Filter for Owner-Only Access ---
 class IsOwnerFilter(SimpleCustomFilter):
