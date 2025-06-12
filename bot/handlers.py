@@ -8,8 +8,12 @@ from datetime import datetime
 from typing import Optional
 
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import (Message, InlineQueryResultArticle, 
-                           InputTextMessageContent, ReactionTypeEmoji)
+from telebot.types import (
+    Message,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    ReactionTypeEmoji,
+)
 from telebot.apihelper import ApiTelegramException
 
 from config import config
