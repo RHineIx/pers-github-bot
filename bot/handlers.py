@@ -8,11 +8,15 @@ from datetime import datetime
 from typing import Optional
 
 from telebot.async_telebot import AsyncTeleBot
+from telebot.async_telebot import AsyncTeleBot
 from telebot.types import (
     Message,
-    InlineQueryResultArticle,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
     InputTextMessageContent,
     ReactionTypeEmoji,
+    InlineQueryResultArticle,
 )
 from telebot.apihelper import ApiTelegramException
 
@@ -20,7 +24,7 @@ from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI, GitHubAPIError
 from github.formatter import RepoFormatter, UserFormatter, URLParser
-from bot.utils import format_duration
+from bot.utils import format_duration, CallbackDataManager
 from bot.summarizer import AISummarizer
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,7 @@ class BotHandlers:
         self.github_api = github_api
         self.db_manager = db_manager
         self.summarizer = summarizer
+        self._last_settings_message_id = {}
 
     def register_handlers(self):
         # Register all command and query handlers, protected by the owner filter.
@@ -48,6 +53,10 @@ class BotHandlers:
         # Main Commands
         self.bot.message_handler(is_owner=True, commands=["start", "help"])(self.handle_help)
         self.bot.message_handler(is_owner=True, commands=["status"])(self.handle_status)
+        
+        self.bot.message_handler(is_owner=True, commands=["settings"])(self.handle_settings)
+        # Central callback handler for all interactive buttons     
+        self.bot.callback_query_handler(is_owner=True, func=lambda call: call.data)(self.handle_callback_query)
         
         # Token Management
         self.bot.message_handler(is_owner=True, commands=["settoken"])(self.handle_set_token)
@@ -64,11 +73,9 @@ class BotHandlers:
         # Inline Mode
         self.bot.inline_handler(is_owner=True, func=lambda query: True)(self.handle_inline_query)
 
-        # General handler for reactions on any message from the owner.
-        self.bot.message_handler(is_owner=True, content_types=['text'])(self.handle_reaction)
-        
-        logger.info("All message and query handlers registered.")
+        self.bot.message_handler(is_owner=True, content_types=['text'])(self.handle_text_message)
 
+        
     async def handle_help(self, message: Message):
         # Handles the /start and /help command.
         help_text = f"👋 **Hi, {message.from_user.first_name}!**\n\n"
@@ -113,6 +120,170 @@ class BotHandlers:
         except Exception as e:
             await self.bot.reply_to(message, f"❌ Failed to send test log. Error: {e}")
 
+    # --- Settings Menu Logic ---
+
+    async def handle_settings(self, message: Message):
+        """Entry point for the /settings command."""
+        await self._send_settings_menu(message.chat.id)
+
+    async def handle_callback_query(self, call: CallbackQuery):
+        """Central router for all button clicks."""
+        data = CallbackDataManager.get_callback_data(call.data)
+        if not data:
+            await self.bot.answer_callback_query(call.id, "Menu expired. Use /settings again.")
+            try: await self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            return
+        
+        action = data.get('action')
+        await self.bot.answer_callback_query(call.id)
+
+        # Route actions based on callback data
+        if action == 'main_menu':
+            await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
+        elif action == 'toggle_pause':
+            await self.db_manager.set_monitoring_paused(not await self.db_manager.is_monitoring_paused())
+            await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
+        elif action == 'open_digest_menu':
+            await self._send_digest_submenu(call.message.chat.id, call.message.message_id)
+        elif action == 'set_digest_mode':
+            await self.db_manager.update_digest_mode(data.get('mode'))
+            await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
+        elif action == 'open_interval_menu':
+            await self._send_interval_submenu(call.message.chat.id, call.message.message_id)
+        elif action == 'set_interval':
+            await self.db_manager.update_monitor_interval(data.get('seconds'))
+            await self._send_interval_submenu(call.message.chat.id, call.message.message_id)
+        elif action == 'open_dest_menu':
+            await self._send_destinations_submenu(call.message.chat.id, call.message.message_id)
+        elif action == 'open_add_dest_prompt':
+            await self.db_manager.set_bot_state('awaiting_destination')
+            await self.bot.edit_message_text("Please send the new destination ID:", call.message.chat.id, call.message.message_id, reply_markup=None)
+        elif action == 'confirm_remove_dest':
+            await self._send_confirm_remove_dest(call.message.chat.id, call.message.message_id, data.get('target_id'))
+        elif action == 'execute_remove_dest':
+            await self.db_manager.remove_destination(data.get('target_id'))
+            await self._send_destinations_submenu(call.message.chat.id, call.message.message_id)
+        elif action == 'confirm_remove_token':
+            await self._send_confirm_remove_token(call.message.chat.id, call.message.message_id)
+        elif action == 'execute_remove_token':
+            await self.db_manager.remove_token()
+            await self.bot.edit_message_text("✅ Token removed. The bot will now stop functioning.", call.message.chat.id, call.message.message_id, reply_markup=None)
+        elif action == 'close':
+             await self.bot.delete_message(call.message.chat.id, call.message.message_id)
+             self._last_settings_message_id.pop(call.message.chat.id, None)
+
+    async def handle_text_message(self, message: Message):
+        """Handles stateful text inputs and default reactions."""
+        bot_state = await self.db_manager.get_bot_state()
+        if bot_state and bot_state.get('state') == 'awaiting_destination':
+            await self._handle_destination_input(message)
+
+    async def _handle_destination_input(self, message: Message):
+        """Processes the received text as a new destination ID."""
+        target_id_str = message.text.strip()
+        
+        if target_id_str.startswith('-'):
+            try:
+                test_msg = await self.bot.send_message(target_id_str, "✅ Bot permission test...")
+                await self.bot.delete_message(test_msg.chat.id, test_msg.message_id)
+            except ApiTelegramException as e:
+                await self.bot.reply_to(message, f"❌ Failed to add destination.\n*Reason:* `{e.description}`")
+                await self.db_manager.clear_bot_state(); return
+        
+        await self.db_manager.add_destination(target_id_str)
+        await self.db_manager.clear_bot_state()
+        await self.bot.delete_message(message.chat.id, message.message_id)
+        conf_msg = await self.bot.send_message(message.chat.id, f"✅ Destination `{target_id_str}` added. Re-opening settings...")
+        await asyncio.sleep(2)
+        await self.bot.delete_message(conf_msg.chat.id, conf_msg.message_id)
+        await self._send_settings_menu(message.chat.id)
+
+    async def _send_or_edit_menu(self, chat_id, text, keyboard, message_id=None, is_edit=False):
+        """Helper function to safely send or edit a menu message."""
+        try:
+            if is_edit and message_id:
+                await self.bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard, parse_mode="Markdown")
+            else:
+                last_msg_id = self._last_settings_message_id.get(chat_id)
+                if last_msg_id:
+                    try: await self.bot.delete_message(chat_id, last_msg_id)
+                    except: pass
+                sent_msg = await self.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
+                self._last_settings_message_id[chat_id] = sent_msg.message_id
+        except ApiTelegramException as e:
+            logger.warning(f"Could not edit/send settings menu for chat {chat_id}. Error: {e}")
+            if is_edit:
+                sent_msg = await self.bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
+                self._last_settings_message_id[chat_id] = sent_msg.message_id
+
+    async def _send_settings_menu(self, chat_id, message_id=None, is_edit=False):
+        """Generates the main settings menu."""
+        is_paused, digest_mode = await asyncio.gather(self.db_manager.is_monitoring_paused(), self.db_manager.get_digest_mode())
+        text = "⚙️ **Bot Settings**\n"
+        pause_text = "▶️ Resume" if is_paused else "⏸️ Pause"
+        digest_text = f"🔔 Mode: {digest_mode.capitalize()}"
+
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(InlineKeyboardButton(pause_text, callback_data=CallbackDataManager.create_callback_data('toggle_pause')),
+                     InlineKeyboardButton(digest_text, callback_data=CallbackDataManager.create_callback_data('open_digest_menu')))
+        keyboard.add(InlineKeyboardButton("⏱️ Set Interval", callback_data=CallbackDataManager.create_callback_data('open_interval_menu')),
+                     InlineKeyboardButton("📍 Manage Destinations", callback_data=CallbackDataManager.create_callback_data('open_dest_menu')))
+        keyboard.add(InlineKeyboardButton("🗑️ Remove Token", callback_data=CallbackDataManager.create_callback_data('confirm_remove_token')))
+        keyboard.add(InlineKeyboardButton("Close Menu", callback_data=CallbackDataManager.create_callback_data('close')))
+        await self._send_or_edit_menu(chat_id, text, keyboard, message_id, is_edit)
+
+    async def _send_digest_submenu(self, chat_id, message_id):
+        """Generates the digest settings sub-menu."""
+        current_mode = await self.db_manager.get_digest_mode()
+        text = "🔔 **Select Notification Mode**"
+        modes = ['off', 'daily', 'weekly']
+        buttons = [InlineKeyboardButton(f"✅ {m.capitalize()}" if m == current_mode else m.capitalize(), callback_data=CallbackDataManager.create_callback_data('set_digest_mode', {'mode': m})) for m in modes]
+        keyboard = InlineKeyboardMarkup().row(*buttons)
+        keyboard.add(InlineKeyboardButton("⬅️ Back", callback_data=CallbackDataManager.create_callback_data('main_menu')))
+        await self.bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard, parse_mode="Markdown")
+
+    async def _send_interval_submenu(self, chat_id, message_id):
+        """Generates the interval sub-menu with presets."""
+        current_interval = await self.db_manager.get_monitor_interval() or config.MONITOR_INTERVAL_SECONDS
+        text = f"⏱️ **Select Check Interval**\n_Current: {format_duration(current_interval)}_"
+        presets = {"5m": 300, "15m": 900, "1h": 3600, "6h": 21600, "1d": 86400}
+        keyboard = InlineKeyboardMarkup(row_width=3)
+        buttons = [InlineKeyboardButton(f"✅ {label}" if seconds == current_interval else label, callback_data=CallbackDataManager.create_callback_data('set_interval', {'seconds': seconds})) for label, seconds in presets.items()]
+        keyboard.add(*buttons)
+        keyboard.add(InlineKeyboardButton("⬅️ Back", callback_data=CallbackDataManager.create_callback_data('main_menu')))
+        await self.bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard, parse_mode="Markdown")
+        
+    async def _send_destinations_submenu(self, chat_id, message_id):
+        """Generates the destination management sub-menu."""
+        destinations = await self.db_manager.get_all_destinations()
+        text = "📍 **Manage Destinations**"
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        if not destinations:
+            text += "\nNo destinations configured."
+        for dest in destinations:
+            display_text = f"❌ {dest}" + (" (Your DM)" if dest == str(chat_id) else "")
+            callback_data = CallbackDataManager.create_callback_data('confirm_remove_dest', {'target_id': dest})
+            keyboard.add(InlineKeyboardButton(display_text, callback_data=callback_data))
+        keyboard.add(InlineKeyboardButton("➕ Add Destination", callback_data=CallbackDataManager.create_callback_data('open_add_dest_prompt')))
+        keyboard.add(InlineKeyboardButton("⬅️ Back", callback_data=CallbackDataManager.create_callback_data('main_menu')))
+        await self.bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard, parse_mode="Markdown")
+
+    async def _send_confirm_remove_dest(self, chat_id, message_id, target_id):
+        """Shows confirmation before removing a destination."""
+        text = f"Are you sure you want to remove this destination?\n`{target_id}`"
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(InlineKeyboardButton("Yes, Remove", callback_data=CallbackDataManager.create_callback_data('execute_remove_dest', {'target_id': target_id})),
+                     InlineKeyboardButton("No, Cancel", callback_data=CallbackDataManager.create_callback_data('open_dest_menu')))
+        await self.bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard, parse_mode="Markdown")
+
+    async def _send_confirm_remove_token(self, chat_id, message_id):
+        """Shows a strong confirmation before removing the token."""
+        text = "⚠️ **ARE YOU SURE?**\n\nThis will delete your GitHub token. This action cannot be undone."
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(InlineKeyboardButton("❌ YES, DELETE IT", callback_data=CallbackDataManager.create_callback_data('execute_remove_token')),
+                     InlineKeyboardButton("✅ No, Cancel", callback_data=CallbackDataManager.create_callback_data('main_menu')))
+        await self.bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard, parse_mode="Markdown")
 
     async def handle_status(self, message: Message):
         # Shows a detailed status of the bot's current state.
@@ -266,14 +437,6 @@ class BotHandlers:
             for i, dest in enumerate(destinations, 1):
                 text += f"{i}. `{dest}` {'(Your DM)' if dest == str(message.from_user.id) else ''}\n"
             await self.bot.reply_to(message, text, parse_mode="Markdown")
-
-    async def handle_reaction(self, message: Message):
-        # Reacts to every message from the owner.
-        try:
-            reaction = [ReactionTypeEmoji(emoji='👍')]
-            await self.bot.set_message_reaction(chat_id=message.chat.id, message_id=message.message_id, reaction=reaction, is_big=False)
-        except Exception as e:
-            logger.warning(f"Could not set reaction: {e}")
 
     async def _show_inline_help(self, query: InlineQueryResultArticle):
         # Get bot info to use actual username

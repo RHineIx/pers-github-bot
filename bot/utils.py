@@ -2,8 +2,12 @@
 # A collection of utility functions used across the bot.
 
 import re
+import json
+import time
+import hashlib
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Dict, Any, Optional
+from collections import OrderedDict
 
 # Formats a duration in seconds into a human-readable string (e.g., "3600 seconds (1.0 hours)").
 def format_duration(seconds: int) -> str:
@@ -89,3 +93,34 @@ def extract_media_from_readme(
     ]
 
     return valid_urls
+
+# Manages callback data to overcome Telegram's 64-byte limit.
+class CallbackDataManager:
+    _data_store: Dict[str, tuple] = OrderedDict()
+    _MAX_ITEMS = 1000
+    _TTL_SECONDS = 3600 * 6  # Keep data for 6 hours
+
+    @classmethod
+    def _cleanup(cls):
+        now = time.time()
+        expired_keys = [k for k, (ts, _) in cls._data_store.items() if now - ts > cls._TTL_SECONDS]
+        for key in expired_keys: del cls._data_store[key]
+        while len(cls._data_store) > cls._MAX_ITEMS: cls._data_store.popitem(last=False)
+
+    @classmethod
+    def create_callback_data(cls, action: str, data: Optional[Dict[str, Any]] = None) -> str:
+        # Creates a short, hashed representation for callback data.
+        if data is None: data = {}
+        if len(cls._data_store) % 100 == 0: cls._cleanup()
+        
+        data_str = json.dumps(data, sort_keys=True) + str(time.time())
+        data_hash = hashlib.md5(data_str.encode()).hexdigest()[:10]
+        
+        cls._data_store[data_hash] = (time.time(), {'action': action, **data})
+        return data_hash
+
+    @classmethod
+    def get_callback_data(cls, data_hash: str) -> Optional[Dict[str, Any]]:
+        # Retrieves the full data dictionary from its hash.
+        stored = cls._data_store.get(data_hash)
+        return stored[1] if stored else None

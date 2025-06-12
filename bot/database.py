@@ -192,3 +192,19 @@ class DatabaseManager:
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM bot_state WHERE key = ?", ("last_error_message",))
             await conn.commit()
+
+    async def set_bot_state(self, state: str):  
+        async with aiosqlite.connect(self.db_path) as conn:  
+            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("bot_state", state))  
+            await conn.commit()  
+    
+    async def get_bot_state(self):  
+        async with aiosqlite.connect(self.db_path) as conn:  
+            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("bot_state",))  
+            result = await cursor.fetchone()  
+            return {"state": result[0]} if result else None  
+    
+    async def clear_bot_state(self):  
+        async with aiosqlite.connect(self.db_path) as conn:  
+            await conn.execute("DELETE FROM bot_state WHERE key = ?", ("bot_state",))  
+            await conn.commit()
