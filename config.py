@@ -1,11 +1,13 @@
 """
 Configuration settings for the Personal GitHub Stars Bot.
 """
+
 import os
 from dotenv import load_dotenv
 
 # Load environment variables from the .env file
 load_dotenv()
+
 
 class Config:
     """
@@ -30,10 +32,11 @@ class Config:
     # --- Bot Behavior Settings ---
     PARSE_MODE: str = "HTML"
     REQUEST_TIMEOUT: int = 30  # seconds
-    CACHE_TTL_SECONDS: int = 600  # Cache API responses for 10 minutes
+    CACHE_TTL_SECONDS: int = 1800  # Cache API responses for 30 minutes
 
     # --- Monitoring Settings ---
     MONITOR_INTERVAL_SECONDS: int = 300  # Check for new stars every 5 minutes
+
 
 # Create a global config instance to be used throughout the application
 config = Config()

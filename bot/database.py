@@ -42,35 +42,70 @@ class DatabaseManager:
             return key
 
     async def init_db(self):
-        """
-        Initializes the database connection and creates the necessary tables
-        if they do not already exist.
-        """
         if self._db_initialized:
             return
-
         try:
             async with aiosqlite.connect(self.db_path) as conn:
-                # A simple key-value table for storing state like the token and last starred IDs
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS bot_state (
-                        key TEXT PRIMARY KEY,
-                        value TEXT NOT NULL
+                await conn.execute(
+                    "CREATE TABLE IF NOT EXISTS bot_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                await conn.execute(
+                    "CREATE TABLE IF NOT EXISTS destinations (target_id TEXT PRIMARY KEY)"
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS digest_queue (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        repo_full_name TEXT UNIQUE NOT NULL,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                """)
-
-                # A table to store all notification destinations
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS destinations (
-                        target_id TEXT PRIMARY KEY
-                    )
-                """)
+                """
+                )
                 await conn.commit()
             self._db_initialized = True
             logger.info("Database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
+
+    async def update_digest_mode(
+        self, mode: str
+    ):  # mode can be 'off', 'daily', 'weekly'
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)",
+                ("digest_mode", mode),
+            )
+            await conn.commit()
+        logger.info(f"Digest mode set to: {mode}")
+
+    async def get_digest_mode(self) -> str:
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute(
+                "SELECT value FROM bot_state WHERE key = ?", ("digest_mode",)
+            )
+            result = await cursor.fetchone()
+            return result[0] if result else "off"  # Default to 'off'
+
+    async def add_repo_to_digest(self, repo_full_name: str):
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "INSERT OR IGNORE INTO digest_queue (repo_full_name) VALUES (?)",
+                (repo_full_name,),
+            )
+            await conn.commit()
+
+    async def get_and_clear_digest_queue(self) -> List[str]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute(
+                "SELECT repo_full_name FROM digest_queue ORDER BY added_at ASC"
+            )
+            rows = await cursor.fetchall()
+            repo_list = [row[0] for row in rows]
+            if repo_list:
+                await conn.execute("DELETE FROM digest_queue")
+                await conn.commit()
+            return repo_list
 
     # --- Token Management ---
 
@@ -118,7 +153,8 @@ class DatabaseManager:
         """Adds a new notification destination."""
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute(
-                "INSERT OR IGNORE INTO destinations (target_id) VALUES (?)", (target_id,)
+                "INSERT OR IGNORE INTO destinations (target_id) VALUES (?)",
+                (target_id,),
             )
             await conn.commit()
 
@@ -178,10 +214,10 @@ class DatabaseManager:
             if result:
                 return int(result[0])
         return None
-    
+
     async def set_monitoring_paused(self, paused: bool) -> None:
         """Sets the monitoring paused state in the database."""
-        #store the boolean as "1" for True and "0" for False.
+        # store the boolean as "1" for True and "0" for False.
         value_to_store = "1" if paused else "0"
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute(
@@ -200,7 +236,7 @@ class DatabaseManager:
             result = await cursor.fetchone()
             # If the value is "1", it's paused. Otherwise, it's not.
             return result[0] == "1" if result else False
-        
+
     async def update_last_error(self, message: str) -> None:
         """Stores the last critical error message."""
         async with aiosqlite.connect(self.db_path) as conn:
@@ -222,5 +258,7 @@ class DatabaseManager:
     async def clear_last_error(self) -> None:
         """Clears the last critical error message."""
         async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("DELETE FROM bot_state WHERE key = ?", ("last_error_message",))
+            await conn.execute(
+                "DELETE FROM bot_state WHERE key = ?", ("last_error_message",)
+            )
             await conn.commit()

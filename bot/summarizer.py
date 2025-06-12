@@ -6,6 +6,7 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+
 class AISummarizer:
     """Handles interaction with the Gemini AI model to summarize README content."""
 
@@ -21,7 +22,7 @@ class AISummarizer:
         Generates a smart summary of a README file using the Gemini model.
         """
         if not readme_content or len(readme_content) < 50:
-            return None # Don't summarize very short or empty READMEs
+            return None  # Don't summarize very short or empty READMEs
 
         # The "Smart Prompt"
         prompt = f"""
@@ -33,7 +34,7 @@ Focus only on what the project does, its key features, and its purpose. Skip ins
 Here is the README:
 ---
 {readme_content[:15000]} 
----""" #truncate to avoid exceeding token limits
+---"""  # truncate to avoid exceeding token limits
 
         try:
             logger.info("Sending README content to Gemini for summarization...")
@@ -44,7 +45,7 @@ Here is the README:
         except Exception as e:
             logger.error(f"An error occurred while communicating with Gemini API: {e}")
             return None
-        
+
     async def select_preview_media(
         self, readme_content: str, media_urls: List[str]
     ) -> List[str]:
@@ -55,7 +56,9 @@ Here is the README:
             return []
 
         # Convert the list of URLs into a numbered string for the prompt
-        formatted_url_list = "\n".join(f"{i+1}. {url}" for i, url in enumerate(media_urls))
+        formatted_url_list = "\n".join(
+            f"{i+1}. {url}" for i, url in enumerate(media_urls)
+        )
 
         prompt = f"""
         You are a UI/UX analyst. Based on the provided README content and a list of media URLs, your task is to select the best 1 to 3 media files that create a compelling visual preview of the project.
@@ -80,9 +83,11 @@ Here is the README:
             logger.info("Asking Gemini to select the best preview media...")
             response = await self.model.generate_content_async(prompt)
             # Clean up the response: remove whitespace and split by comma
-            selected_urls = [url.strip() for url in response.text.strip().split(',') if url.strip()]
+            selected_urls = [
+                url.strip() for url in response.text.strip().split(",") if url.strip()
+            ]
             logger.info(f"Gemini selected {len(selected_urls)} media URLs.")
-            return selected_urls[:3] # Ensure don't exceed the max of 3
+            return selected_urls[:3]  # Ensure don't exceed the max of 3
         except Exception as e:
             logger.error(f"Error during media selection with Gemini API: {e}")
             return []
