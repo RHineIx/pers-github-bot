@@ -1,4 +1,4 @@
-# In github/api.py
+# github/api.py
 
 import aiohttp
 import asyncio
@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class GitHubAPIError(Exception):
-    """Custom exception for GitHub API errors."""
-
+    # Custom exception for GitHub API related errors.
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
         self.message = message
@@ -24,13 +23,7 @@ class GitHubAPIError(Exception):
 
 
 class GitHubAPI:
-    """
-    Asynchronous GitHub API client with an advanced E-Tag based caching system
-    to minimize API rate limit consumption and improve performance.
-    """
-
-    # --- CACHE STRUCTURE ---
-    # The cache now stores: (timestamp, etag, data)
+    # The cache stores: (timestamp, etag, data)
     _cache: Dict[str, Tuple[float, Optional[str], Any]] = {}
 
     def __init__(self, db_manager: DatabaseManager):
@@ -39,7 +32,7 @@ class GitHubAPI:
         self.cache_ttl = config.CACHE_TTL_SECONDS
 
     async def _get_headers(self) -> Dict[str, str]:
-        """Constructs the base request headers with the user's token."""
+        # Constructs base request headers with authentication.
         headers = {
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "Personal-GitHub-Stars-Bot/1.0",
@@ -50,145 +43,122 @@ class GitHubAPI:
         return headers
 
     async def _make_request(
-        self, endpoint: str, etag: Optional[str] = None
-    ) -> Tuple[int, Dict[str, Any], Optional[Any]]:
-        """
-        Makes a request to the GitHub API. Now includes E-Tag handling.
-        Returns a tuple of (status_code, response_headers, response_json).
-        """
+        self, endpoint: str, etag: Optional[str] = None, extra_headers: Optional[Dict] = None
+    ) -> Tuple[int, Dict, Optional[Any]]:
+        # Central method for making all HTTP requests to the GitHub API.
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = await self._get_headers()
 
         if "Authorization" not in headers:
-            raise GitHubAPIError(
-                401, "Cannot make API request: GitHub token not found."
-            )
-
-        # --- Add the If-None-Match header if an E-Tag is provided ---
+            raise GitHubAPIError(401, "GitHub token not found.")
+        
+        # Add E-Tag for conditional requests if provided.
         if etag:
             headers["If-None-Match"] = etag
+        
+        # Merge any extra headers, e.g., for getting starred timestamps.
+        if extra_headers:
+            headers.update(extra_headers)
 
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT)
         ) as session:
             try:
                 async with session.get(url, headers=headers) as response:
-                    # --- Handle 304 Not Modified status ---
+                    # Handle 304 Not Modified for cached requests.
                     if response.status == 304:
-                        logger.info(
-                            f"Cache valid (304 Not Modified) for endpoint: {endpoint}"
-                        )
                         return 304, response.headers, None
 
-                    if response.status in [200, 201, 202]:
+                    # Handle successful responses.
+                    if 200 <= response.status < 300:
                         return response.status, response.headers, await response.json()
 
-                    if (
-                        response.status == 403
-                        and "X-RateLimit-Reset" in response.headers
-                    ):
+                    # Handle rate limiting.
+                    if response.status == 403 and "X-RateLimit-Reset" in response.headers:
                         reset_timestamp = int(response.headers["X-RateLimit-Reset"])
                         wait_duration = max(reset_timestamp - int(time.time()), 0) + 2
-                        logger.warning(
-                            f"Rate limit exceeded. Waiting for {wait_duration} seconds."
-                        )
+                        logger.warning(f"Rate limit exceeded. Waiting for {wait_duration}s.")
                         await asyncio.sleep(wait_duration)
-                        return await self._make_request(endpoint, etag)
+                        return await self._make_request(endpoint, etag, extra_headers)
 
-                    error_text = await response.text()
-                    logger.error(
-                        f"GitHub API error: {response.status} - {error_text} for URL {url}"
-                    )
-                    raise GitHubAPIError(response.status, error_text)
+                    # Handle all other errors.
+                    raise GitHubAPIError(response.status, await response.text())
 
             except asyncio.TimeoutError:
                 raise GitHubAPIError(408, "Request timed out")
             except Exception as e:
                 if not isinstance(e, GitHubAPIError):
+                    logger.error(f"Unexpected request error for {url}: {e}")
                     raise GitHubAPIError(500, str(e))
                 raise e
-
+    
     async def _make_cached_request(self, endpoint: str) -> Optional[Any]:
-        """
-        A generic method to handle cached requests using the E-Tag mechanism.
-        """
+        # Generic wrapper for API calls that should be cached using E-Tags.
         cache_key = endpoint
         cached_entry = self._cache.get(cache_key)
         etag = None
 
         if cached_entry:
             timestamp, etag, cached_data = cached_entry
-            # For very recent requests, serve from cache immediately without checking E-Tag
-            if time.time() - timestamp < 60:  # 1-minute fast cache
-                logger.info(f"Serving fresh (<60s) cached data for: {endpoint}")
-                return cached_data
-
+            # For very recent requests (<60s), serve directly from cache to save an API call.
+            if time.time() - timestamp < 60:
+                 return cached_data
+        
         try:
             status, headers, data = await self._make_request(endpoint, etag=etag)
-
-            if status == 304:
-                # Content has not changed, update timestamp and return cached data
-                if cached_entry:
-                    _, etag, cached_data = cached_entry
-                    self._cache[cache_key] = (time.time(), etag, cached_data)
-                    return cached_data
-
+            
+            if status == 304 and cached_entry:
+                # Cache is still valid. Update timestamp and return cached data.
+                _, etag, cached_data = cached_entry
+                self._cache[cache_key] = (time.time(), etag, cached_data)
+                return cached_data
+            
             elif status == 200:
-                # New data received, update cache with new data and new E-Tag
+                # New data received. Update cache with new data and E-Tag.
                 new_etag = headers.get("ETag")
                 self._cache[cache_key] = (time.time(), new_etag, data)
                 return data
 
         except GitHubAPIError as e:
-            # If a 404 happens on a conditional request, the cached data might be for a deleted repo.
-            # In this case, we should invalidate the cache and return None.
+            # If a conditional request returns 404, the resource was likely deleted.
             if e.status_code == 404 and cache_key in self._cache:
                 del self._cache[cache_key]
-            # Re-raise other errors to be handled by the caller
             raise e
-
+            
         return None
+
+    # --- Public API methods ---
 
     async def get_repository(self, owner: str, repo: str) -> Optional[Dict[str, Any]]:
         return await self._make_cached_request(f"repos/{owner}/{repo}")
 
-    async def get_repository_languages(
-        self, owner: str, repo: str
-    ) -> Optional[Dict[str, int]]:
+    async def get_repository_languages(self, owner: str, repo: str) -> Optional[Dict[str, int]]:
         return await self._make_cached_request(f"repos/{owner}/{repo}/languages")
 
-    async def get_latest_release(
-        self, owner: str, repo: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_latest_release(self, owner: str, repo: str) -> Optional[Dict[str, Any]]:
         try:
-            return await self._make_cached_request(
-                f"repos/{owner}/{repo}/releases/latest"
-            )
+            return await self._make_cached_request(f"repos/{owner}/{repo}/releases/latest")
         except GitHubAPIError as e:
-            if e.status_code == 404:
-                return {}
+            if e.status_code == 404: return {} # Return empty dict if no releases found.
             raise e
-
+            
     async def get_user(self, username: str) -> Optional[Dict[str, Any]]:
         return await self._make_cached_request(f"users/{username}")
 
     async def get_readme(self, owner: str, repo: str) -> Optional[str]:
         try:
-            readme_data = await self._make_cached_request(
-                f"repos/{owner}/{repo}/readme"
-            )
+            readme_data = await self._make_cached_request(f"repos/{owner}/{repo}/readme")
             if readme_data and "content" in readme_data:
                 return base64.b64decode(readme_data["content"]).decode("utf-8")
             return None
         except GitHubAPIError as e:
-            if e.status_code == 404:
-                return None
+            if e.status_code == 404: return None
             raise e
 
-    # --- Methods that should NOT be cached or have different logic ---
+    # --- Methods that should NOT be cached or have custom logic ---
 
     async def get_authenticated_user(self) -> Optional[Dict[str, Any]]:
-        # This is for validation, should not be cached.
+        # This is for validation, should always be fresh.
         status, _, data = await self._make_request("user")
         return data if status == 200 else None
 
@@ -200,13 +170,9 @@ class GitHubAPI:
     async def get_authenticated_user_starred_repos(
         self, page: int = 1, per_page: int = 50
     ) -> Optional[List[Dict[str, Any]]]:
-        # Star feed should always be fresh for the monitor.
-        # This requires a custom header, so we call _make_request directly.
-        headers = await self._get_headers()
-        headers["Accept"] = "application/vnd.github.star+json"
-        url = f"{self.base_url}/user/starred?page={page}&per_page={per_page}&sort=created&direction=desc"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    return await response.json()
-                raise GitHubAPIError(response.status, await response.text())
+        # Star feed must be fresh and requires a special 'Accept' header for timestamps.
+        # Now uses the central _make_request method for robustness.
+        endpoint = f"user/starred?page={page}&per_page={per_page}&sort=created&direction=desc"
+        extra_headers = {"Accept": "application/vnd.github.star+json"}
+        status, _, data = await self._make_request(endpoint, extra_headers=extra_headers)
+        return data if status == 200 else None

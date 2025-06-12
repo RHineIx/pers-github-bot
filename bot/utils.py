@@ -1,11 +1,12 @@
 # bot/utils.py
+# A collection of utility functions used across the bot.
+
 import re
 from datetime import datetime, timezone
 from typing import List
 
-
+# Formats a duration in seconds into a human-readable string (e.g., "3600 seconds (1.0 hours)").
 def format_duration(seconds: int) -> str:
-    """Formats a duration in seconds into a human-readable string."""
     if seconds < 120:
         return f"{seconds} seconds"
 
@@ -20,19 +21,17 @@ def format_duration(seconds: int) -> str:
     days = hours / 24
     return f"{seconds} seconds (approx. {days:.1f} days)"
 
-
+# Converts a GitHub ISO timestamp into a 'time ago' format (e.g., "5 days ago").
 def format_time_ago(timestamp_str: str) -> str:
-    """Converts an ISO 8601 timestamp string to a human-readable 'time ago' format."""
     if not timestamp_str:
         return "N/A"
 
-    # Parse the timestamp string from GitHub
-    # The 'Z' at the end means UTC, which is equivalent to +00:00
+    # Parse the UTC timestamp from GitHub by replacing the 'Z' suffix.
     date_obj = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-
-    # Get the current time in UTC to compare
+    
+    # Get the current time in UTC for an accurate comparison.
     now = datetime.now(timezone.utc)
-
+    
     delta = now - date_obj
     seconds = delta.total_seconds()
 
@@ -54,49 +53,36 @@ def format_time_ago(timestamp_str: str) -> str:
         years = int(seconds / 31536000)
         return f"{years} year{'s' if years > 1 else ''} ago"
 
-
+# Extracts all valid media URLs (images, gifs, videos) from README markdown text.
 def extract_media_from_readme(
     markdown_text: str, owner: str, repo: str, branch: str
 ) -> List[str]:
-    """
-    Extracts and resolves all image and GIF URLs from README markdown text.
-    Converts relative URLs to absolute GitHub URLs.
-    """
     if not markdown_text:
         return []
 
-    # Regex to find Markdown images `![alt](url)` and HTML images `<img src="url">`
-    # It captures the URL part.
+    # Regex to find both Markdown `![alt](url)` and HTML `<img src="url">` tags.
     image_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]'
     found_urls = re.findall(image_pattern, markdown_text)
 
-    # The regex returns tuples of capture groups, so need to flatten the list
-    # and filter out empty matches.
+    # Flatten the list of tuples from regex groups and filter out empty matches.
     urls = [url for group in found_urls for url in group if url]
 
     absolute_urls = []
     for url in urls:
         url = url.strip()
-        # If the URL is already absolute, add it directly
+        # If the URL is already absolute, use it directly.
         if url.startswith("http://") or url.startswith("https://"):
             absolute_urls.append(url)
-        # If the URL is a relative path, construct the full raw GitHub URL
+        # Otherwise, resolve the relative path to a full GitHub raw content URL.
         else:
-            # Clean up relative path prefixes like './'
             clean_path = url.lstrip("./").lstrip("/")
             absolute_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{clean_path}"
             absolute_urls.append(absolute_url)
 
-    # Filter for common image and GIF formats
+    # Filter the final list to include only supported media file types.
     valid_media_extensions = (
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".webp",
-        ".mp4",
-        ".mov",
-        ".webm",
+        ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        ".mp4", ".mov", ".webm",
     )
     valid_urls = [
         url for url in absolute_urls if url.lower().endswith(valid_media_extensions)

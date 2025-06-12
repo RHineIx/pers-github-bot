@@ -18,7 +18,7 @@ logging.basicConfig(
 logging.getLogger("telebot").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-
+# --- Custom Filter for Owner-Only Access ---
 class IsOwnerFilter(SimpleCustomFilter):
     key = "is_owner"
 
@@ -30,37 +30,59 @@ class IsOwnerFilter(SimpleCustomFilter):
 
 
 async def main():
+    # Define tasks here to be accessible in the 'finally' block for cleanup
+    monitor_task = None
+    scheduler = None
+    
     try:
-        logger.info("Initializing bot components...")
+        
+        # Initialize database and API clients first as they are dependencies for others.
         db_manager = DatabaseManager()
         await db_manager.init_db()
         github_api = GitHubAPI(db_manager)
 
+        # Initialize the AI summarizer only if the API key is provided.
         summarizer = None
         if config.GEMINI_API_KEY:
             summarizer = AISummarizer(config.GEMINI_API_KEY)
         else:
             logger.warning("GEMINI_API_KEY not found. AI features disabled.")
 
+        # Initialize the main bot instance.
         bot = AsyncTeleBot(config.BOT_TOKEN, parse_mode=config.PARSE_MODE)
+        
+        # Register our custom owner-only filter.
         bot.add_custom_filter(IsOwnerFilter())
 
+        # Initialize command handlers and register them with the bot.
         handlers = BotHandlers(bot, github_api, db_manager, summarizer)
         handlers.register_handlers()
 
-        monitor = RepositoryMonitor(bot, github_api, db_manager)
-
+        # Initialize the background task managers.
+        monitor = RepositoryMonitor(github_api, db_manager, scheduler)
         scheduler = DigestScheduler(bot, github_api, db_manager, summarizer)
+
+        # Start the digest scheduler (for daily/weekly notifications).
         scheduler.start()
 
+        # Start the repository monitoring loop as a concurrent task.
         monitor_task = asyncio.create_task(monitor.start_monitoring())
+
 
         logger.info("Personal GitHub Stars Bot started successfully!")
         await bot.infinity_polling(logger_level=logging.INFO)
 
     except Exception as e:
-        logger.error(f"A critical error occurred: {e}", exc_info=True)
+        logger.error(f"A critical error occurred during bot startup or runtime: {e}", exc_info=True)
     finally:
+        # This block ensures that background tasks are properly shut down when the bot stops.
+        logger.info("Bot is stopping...")
+        if monitor_task and not monitor_task.done():
+            monitor_task.cancel()
+            logger.info("Monitoring task has been cancelled.")
+        if scheduler and scheduler.scheduler.running:
+            scheduler.scheduler.shutdown()
+            logger.info("Digest scheduler has been shut down.")
         logger.info("Bot has stopped.")
 
 

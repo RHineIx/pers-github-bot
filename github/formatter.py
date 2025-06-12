@@ -1,21 +1,20 @@
-"""
-Response formatting utilities for GitHub data.
-This file is adapted from the original project to ensure identical message formatting.
-"""
+# github/formatter.py
 
 import re
 from typing import Dict, Any, Optional, List
+
 from telebot import types
 from telebot.util import quick_markup
+
 from bot.utils import format_time_ago
 
 
+# Formats data related to repositories.
 class RepoFormatter:
-    """Formats repository data for Telegram messages."""
 
     @staticmethod
     def format_number(num: int) -> str:
-        """Formats large numbers with K/M suffixes."""
+        # Abbreviates large numbers, e.g., 12345 -> 12.3K
         if num >= 1000000:
             return f"{num/1000000:.1f}M"
         if num >= 1000:
@@ -24,7 +23,7 @@ class RepoFormatter:
 
     @staticmethod
     def calculate_language_percentages(languages: Dict[str, int]) -> Dict[str, float]:
-        """Calculates percentage distribution of programming languages."""
+        # Calculates the percentage of each programming language used.
         total = sum(languages.values())
         if total == 0:
             return {}
@@ -37,24 +36,24 @@ class RepoFormatter:
         latest_release: Optional[Dict[str, Any]],
         ai_summary: Optional[str] = None,
     ) -> str:
-        """Formats the preview, using AI summary if available, otherwise fallback to default."""
+        """Constructs the main HTML message for a repository preview."""
         full_name = repo_data.get("full_name", "N/A")
         html_url = repo_data.get("html_url", "")
 
+        # Use the smart AI summary if available, otherwise fall back to the default repo description.
         description = (
             ai_summary
             if ai_summary
             else repo_data.get("description", "No description available.")
         )
 
-        # ... rest of the data extraction is the same ...
         stars = RepoFormatter.format_number(repo_data.get("stargazers_count", 0))
         forks = RepoFormatter.format_number(repo_data.get("forks_count", 0))
         issues = repo_data.get("open_issues_count", 0)
+        
         pushed_at = repo_data.get("pushed_at")
         last_updated_str = format_time_ago(pushed_at)
 
-        # ... the rest of the function remains the same ...
         release_info = "No official releases"
         if latest_release:
             release_name = latest_release.get("tag_name", "N/A")
@@ -74,29 +73,29 @@ class RepoFormatter:
                 ]
             )
 
+        # The final HTML message template.
         message = f"""📦 <a href='{html_url}'>{full_name}</a>
 
-📝 <b>Desc:</b>
+📝 <b>Description:</b>
 <blockquote expandable>{description}</blockquote>
 
-<blockquote>⭐ Stars: <b>{stars}</b> | 🍴 Forks: <b>{forks}</b> | 🪲 Open Issues: <b>{issues}</b></blockquote>
+<blockquote>⭐ <b>Stars:</b> {stars} | 🍴 <b>Forks:</b> {forks} | 🪲 <b>Open Issues:</b> {issues}</blockquote>
 
 🚀 <b>Latest Release:</b> {release_info}
 ⏳ <b>Last updated:</b> {last_updated_str}
-
-💻 <b>Lang's:</b> {languages_text}
+💻 <b>Langs:</b> {languages_text}
 
 <a href='{html_url}'>🔗 View on GitHub</a>
 """
         return message.strip()
 
 
+# Formats data related to GitHub users.
 class UserFormatter:
-    """Formats user data for Telegram messages."""
 
     @staticmethod
     def format_user_info(user_data: Dict[str, Any]) -> str:
-        """Formats user information message."""
+        """Constructs the HTML message for a user profile."""
         name = user_data.get("name", "Not specified")
         login = user_data.get("login", "N/A")
         bio = user_data.get("bio", "No bio available.")
@@ -111,32 +110,33 @@ class UserFormatter:
 📝 <b>Bio:</b>
 {bio}
      
-👥 Followers: <b>{followers}</b>
-👤 Following: <b>{following}</b>
-📁 Public Repos: <b>{public_repos}</b>
+👥 <b>Followers:</b> {followers}
+👤 <b>Following:</b> {following}
+📁 <b>Public Repos:</b> {public_repos}
 
 <a href="{html_url}">🔗 View Profile on GitHub</a>
 """
         return message.strip()
 
 
+# Parses different formats of GitHub URLs.
 class URLParser:
-    """Utility class for parsing GitHub URLs."""
 
     @staticmethod
     def parse_repo_input(text: str) -> Optional[tuple]:
         """
-        Parses GitHub repository URL or 'owner/repo' format.
-        Returns a tuple of (owner, repo) or None if parsing fails.
+        Parses a string to extract owner and repo name.
+        Handles both full URLs and 'owner/repo' format.
         """
         patterns = [
-            r"github\.com/([^/]+)/([^/\s]+)",  # Full GitHub URL
-            r"^([^/\s]+)/([^/\s]+)$",  # 'owner/repo' format
+            r"github\.com/([^/]+)/([^/\s]+)",  # Pattern for full GitHub URLs
+            r"^([^/\s]+)/([^/\s]+)$",          # Pattern for 'owner/repo' format
         ]
         for pattern in patterns:
             match = re.search(pattern, text.strip())
             if match:
                 owner, repo = match.groups()
-                repo = repo.replace(".git", "")  # Clean '.git' suffix
+                # Clean '.git' suffix if present, e.g., from a clone URL.
+                repo = repo.replace(".git", "")
                 return owner, repo
         return None
