@@ -29,12 +29,13 @@ class AISummarizer:
 
         # The prompt for generating the repository summary.
         prompt = textwrap.dedent(f"""
-            You are a senior software developer.
-            Summarize the following README.md content in a short, **clear**, and engaging English paragraph of **no more than 900 characters**.
-            Focus only on what the project does, its key features, and its purpose. Skip installation, usage, license, and contribution parts.
+You are a senior software developer with experience in technical writing for open-source projects.
 
-            Here is the README:
-            ---
+Your task is to refine the following GitHub README.md description, but **only make minimal improvements** — do not change the original meaning or style. Apply edits **only if absolutely necessary** (e.g., grammar, clarity), and **limit changes to 1%** of the content.
+**Very Important:** The final description **must not exceed 650 characters**. This is a hard limit. Your response must be in plain text with no formatting or quotes.
+Focus strictly on describing what the project does, its purpose, and key features. Ignore installation, setup, or licensing details.
+Original README content:
+---
             {readme_content[:15000]}
             ---
         """) # Truncate content to avoid exceeding token limits.
@@ -63,12 +64,15 @@ class AISummarizer:
 
         # The prompt for selecting the best visual media.
         prompt = textwrap.dedent(f"""
-            You are a UI/UX analyst. Based on the provided README content and a list of media URLs, your task is to select the best 1 to 3 media files that create a compelling visual preview of the project.
+            You are a skilled UI/UX analyst with expertise in selecting media that best represent software projects visually.
 
-            1.  **Analyze the README** to understand the project's core functionality.
-            2.  **Examine the media list.** Prioritize actual application screenshots, workflow GIFs, or demo videos.
-            3.  **Avoid** logos, badges, and simple diagrams if better options exist.
-            4.  **Return a comma-separated list** of the URLs you have selected, with the most important one first. Do not add any other text. For example: "https://.../url1.png,https://.../url2.gif"
+            Given the README content and a list of media URLs, your task is to select the top 1  media files that effectively showcase the project's core functionality and user experience.
+
+            Selection criteria:
+            1. Prioritize screenshots of the actual application (e.g., .png, .jpg), workflow animations (e.g., .gif), or demo videos (e.g., .mp4, .webm) that clearly demonstrate usage.
+            2. Avoid generic logos, badges, or simple static diagrams unless no better options exist.
+            3. Choose media that best engage potential users by providing clear insight into the project's purpose and features.
+            4. Return only a comma-separated list of the selected URLs, ordered by importance. Do not add any additional text or formatting.
 
             **README Content:**
             ---
@@ -91,7 +95,7 @@ class AISummarizer:
             ]
             
             logger.info(f"Gemini selected {len(selected_urls)} media URLs.")
-            return selected_urls[:3]  # Enforce the max limit of 3.
+            return selected_urls[:1]  # Enforce the max limit of 1.
         except Exception as e:
             logger.error(f"Error during media selection with Gemini API: {e}")
             return []

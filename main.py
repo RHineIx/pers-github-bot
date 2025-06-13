@@ -75,8 +75,8 @@ async def main():
         handlers.register_handlers()
 
         # Initialize the background task managers.
+        scheduler = DigestScheduler(bot, github_api, db_manager, summarizer)  
         monitor = RepositoryMonitor(github_api, db_manager, scheduler)
-        scheduler = DigestScheduler(bot, github_api, db_manager, summarizer)
 
         # Start the digest scheduler (for daily/weekly notifications).
         scheduler.start()
