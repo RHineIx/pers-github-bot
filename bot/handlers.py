@@ -471,7 +471,7 @@ class BotHandlers:
                     res = dict(zip(tasks.keys(), task_results))
                     if res["repo_data"]:
                         ai_summary = None
-                        if self.summarizer and res["readme"]: ai_summary = await self.summarizer.summarize_readme(res["readme"])
+                        # if self.summarizer and res["readme"]: ai_summary = await self.summarizer.summarize_readme(res["readme"]) 
                         preview_text = RepoFormatter.format_repository_preview(res["repo_data"], res["languages"], res["latest_release"], ai_summary)
                         results.append(InlineQueryResultArticle(id=f"repo_{owner}_{repo_name}",title=f"📦 {owner}/{repo_name}",description=res["repo_data"].get("description", "")[:60],input_message_content=InputTextMessageContent(preview_text, parse_mode="HTML"),thumbnail_url=res["repo_data"].get("owner", {}).get("avatar_url")))
             elif query_text.startswith(".user "):

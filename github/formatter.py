@@ -80,7 +80,7 @@ class RepoFormatter:
 📝 <b>Description:</b>
 <blockquote expandable>{description}</blockquote>
 
-<blockquote>⭐ <b>Stars:</b> {stars} | 🍴 <b>Forks:</b> {forks} | 🪲 <b>Open Issues:</b> {issues}</blockquote>
+⭐ <b>Stars:</b> {stars} | 🍴 <b>Forks:</b> {forks} | 🪲 <b>Open Issues:</b> {issues}
 
 🚀 <b>Latest Release:</b> {release_info}
 ⏳ <b>Last updated:</b> {last_updated_str}

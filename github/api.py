@@ -166,7 +166,7 @@ class GitHubAPI:
             return None  
         except GitHubAPIError as e:  
             if e.status_code == 404: return None  
-            raise e  
+            raise e
   
     # --- Methods that should NOT be cached or have custom logic ---  
   
