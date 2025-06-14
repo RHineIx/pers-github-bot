@@ -78,7 +78,7 @@ class RepoFormatter:
         topics = repo_data.get("topics", [])[:4]
         topics_text = ""
         if topics:
-            formatted_topics = " ".join([f"<code>#{topic}</code>" for topic in topics])
+            formatted_topics = " ".join([f"#{topic}" for topic in topics])
             # Add newlines for spacing below the main content
             topics_text = f"\n\n{formatted_topics}"
 
