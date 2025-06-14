@@ -9,6 +9,7 @@ from typing import Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InputMediaPhoto, InputMediaVideo
+from telebot.apihelper import ApiTelegramException
 
 from config import config
 from bot.database import DatabaseManager
@@ -162,13 +163,29 @@ class DigestScheduler:
                             chat_id=chat_id,
                             text=caption_text,
                             parse_mode=config.PARSE_MODE,
-                            disable_web_page_preview=False,
+                            disable_web_page_preview=False, # Attempt with preview first
                             message_thread_id=thread_id,
                         )
+                except ApiTelegramException as e:
+                    # This is the new part to handle the error smartly
+                    if "WEBPAGE_CURL_FAILED" in e.description:
+                        logger.warning(f"WEBPAGE_CURL_FAILED for {owner, repo_name}. Retrying without preview/media.")
+                        try:
+                            # Retry sending as a simple text message with web page preview disabled
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text=caption_text,
+                                parse_mode=config.PARSE_MODE,
+                                disable_web_page_preview=True, # Disable preview on retry
+                                message_thread_id=thread_id,
+                            )
+                        except Exception as final_e:
+                            logger.error(f"Failed to send notification to {target} even after retry: {final_e}")
+                    else:
+                        # For any other API error, just log it
+                        logger.error(f"Failed to send notification to destination {target}: {e}")
                 except Exception as e:
-                    logger.error(f"Failed to send notification to destination {target}: {e}")
+                    # For non-API errors
+                    logger.error(f"An unexpected error occurred sending to {target} for {owner, repo_name}: {e}", exc_info=True)
         except Exception as e:
-            logger.error(
-                f"Failed to process notification for {owner}/{repo_name}: {e}",
-                exc_info=True,
-            )
+            logger.error(f"Failed to process and send notification for {owner, repo_name}: {e}", exc_info=True)

@@ -20,6 +20,12 @@ from telebot.types import (
 )
 from telebot.apihelper import ApiTelegramException
 
+# Add this import at the top of the file to avoid circular import errors
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bot.scheduler import DigestScheduler
+
 from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI, GitHubAPIError
@@ -37,11 +43,13 @@ class BotHandlers:
         github_api: GitHubAPI,
         db_manager: DatabaseManager,
         summarizer: Optional[AISummarizer],
+        scheduler: "DigestScheduler",
     ):
         self.bot = bot
         self.github_api = github_api
         self.db_manager = db_manager
         self.summarizer = summarizer
+        self.scheduler = scheduler 
         self._last_settings_message_id = {}
 
     def register_handlers(self):
@@ -301,23 +309,42 @@ class BotHandlers:
                 "interval": self.db_manager.get_monitor_interval(),
                 "is_paused": self.db_manager.is_monitoring_paused(),
                 "last_error": self.db_manager.get_last_error(),
-                "digest_mode": self.db_manager.get_digest_mode()
+                "digest_mode": self.db_manager.get_digest_mode(),
+                "queue_count": self.db_manager.get_digest_queue_count()
             }
             results = await asyncio.gather(*tasks.values())
             res = dict(zip(tasks.keys(), results))
 
-            # Build the status message.
+            # --- Get next scheduled job time ---
+            next_run_info = "Not scheduled"
+            if self.scheduler and self.scheduler.scheduler.running:
+                jobs = self.scheduler.scheduler.get_jobs()
+                if jobs:
+                    # Find the earliest next run time among all jobs
+                    next_run_time = min(job.next_run_time for job in jobs if job.next_run_time)
+                    if next_run_time:
+                        # Format the time string
+                        next_run_info = next_run_time.strftime('%A, %Y-%m-%d at %H:%M:%S %Z')
+
+            # --- Build the status message ---
             status_text = "📊 *Bot Status*\n\n"
             if res.get('last_error'):
                 status_text += f"⚠️ *LAST ERROR:*\n`{res['last_error']}`\n\n"
 
             monitoring_status = "Paused ⏸️" if res.get('is_paused') else "Active ✅"
             status_text += f"📢 *Monitoring:* `{monitoring_status}`\n"
-            status_text += f"🔔 *Notification Mode:* `{res.get('digest_mode', 'off').capitalize()}`\n"
-            
+
+            digest_mode = res.get('digest_mode', 'off').capitalize()
+            status_text += f"🔔 *Notification Mode:* `{digest_mode}`\n"
+
+            # Show queued items only if digest mode is on
+            if digest_mode != 'Off':
+                status_text += f"📦 *Items in Queue:* `{res.get('queue_count', 0)}`\n"
+                status_text += f"🗓️ *Next Digest:* `{next_run_info}`\n"
+
             if res.get('user'):
                 status_text += f"👤 *GitHub Account:* `@{res['user'].get('login', 'N/A')}`\n"
-            
+
             if res.get('rate_limit'):
                 core = res['rate_limit'].get('resources', {}).get('core', {})
                 status_text += f"📈 *API Limit:* `{core.get('remaining', 'N/A')}/{core.get('limit', 'N/A')}`\n"
@@ -325,11 +352,12 @@ class BotHandlers:
             current_interval = res.get('interval') or config.MONITOR_INTERVAL_SECONDS
             status_text += f"⏱️ *Check Interval:* `{format_duration(current_interval)}`\n"
             status_text += f"📍 *Destinations:* `{len(res.get('destinations', []))}` configured."
-            
+
             await self.bot.edit_message_text(status_text, wait_msg.chat.id, wait_msg.message_id, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Error fetching status: {e}", exc_info=True)
             await self.bot.edit_message_text("❌ An error occurred while fetching status.", wait_msg.chat.id, wait_msg.message_id)
+
             
     async def handle_set_token(self, message: Message):
         # Sets the GitHub token and performs initial setup.

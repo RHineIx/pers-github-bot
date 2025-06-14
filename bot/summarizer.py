@@ -29,12 +29,22 @@ class AISummarizer:
 
         # The prompt for generating the repository summary.
         prompt = textwrap.dedent(f"""
-You are a senior software developer with experience in technical writing for open-source projects.
+You are a text processing AI assistant. Your task is to extract and slightly reformat the core description from the provided GitHub README.
 
-Your task is to refine the following GitHub README.md description, but **only make minimal improvements** — do not change the original meaning or style. Apply edits **only if absolutely necessary** (e.g., grammar, clarity), and **limit changes to 1%** of the content.
-**Very Important:** The final description **must not exceed 650 characters**. This is a hard limit. Your response must be in plain text with no formatting or quotes.
-Focus strictly on describing what the project does, its purpose, and key features. Ignore installation, setup, or licensing details.
-Original README content:
+**CRITICAL RULES:**
+
+1.  **High Fidelity (80% Original):** Your primary goal is to preserve the original text. The output must be approximately 80% identical to the source description. Do NOT creatively rephrase sentences or change the original meaning and tone.
+
+2.  **Minimal Formatting (20% Readability):** The only changes you are allowed to make are for improving readability on a small screen. You can:
+    - Add line breaks (`\n`) to separate distinct points or ideas.
+    - Split a very long paragraph into two.
+    - **Your output MUST be plain text.** Do NOT use any Markdown or HTML (`*`, `_`, `#`, `<b>`, `<a>`, etc.).
+
+3.  **Strict Character Limit:** The final output **"MUST NOT EXCEED 650 characters"**. This is an absolute and critical limit. Be concise. Remove non-essential filler phrases from the original text only if necessary to meet this limit.
+
+4.  **Content Focus:** Extract only the description that explains what the project is, its purpose, and its key features. Ignore sections about installation, configuration, usage examples, or licensing.
+
+**Original README content to process:**
 ---
             {readme_content[:15000]}
             ---
@@ -66,7 +76,7 @@ Original README content:
         prompt = textwrap.dedent(f"""
             You are a skilled UI/UX analyst with expertise in selecting media that best represent software projects visually.
 
-            Given the README content and a list of media URLs, your task is to select the top 1  media files that effectively showcase the project's core functionality and user experience.
+            Given the README content and a list of media URLs, your task is to select the top 1 to 2  media files that effectively showcase the project's core functionality and user experience.
 
             Selection criteria:
             1. Prioritize screenshots of the actual application (e.g., .png, .jpg), workflow animations (e.g., .gif), or demo videos (e.g., .mp4, .webm) that clearly demonstrate usage.
@@ -95,7 +105,7 @@ Original README content:
             ]
             
             logger.info(f"Gemini selected {len(selected_urls)} media URLs.")
-            return selected_urls[:1]  # Enforce the max limit of 1.
+            return selected_urls[:2]  # Enforce the max limit of 2.
         except Exception as e:
             logger.error(f"Error during media selection with Gemini API: {e}")
             return []

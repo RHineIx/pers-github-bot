@@ -70,12 +70,15 @@ async def main():
         # Register our custom owner-only filter.
         bot.add_custom_filter(IsOwnerFilter())
 
+        # Initialize the background task managers that handlers depend on.
+        scheduler = DigestScheduler(bot, github_api, db_manager, summarizer)
+        
         # Initialize command handlers and register them with the bot.
-        handlers = BotHandlers(bot, github_api, db_manager, summarizer)
+        # We pass the scheduler instance to the handlers now.
+        handlers = BotHandlers(bot, github_api, db_manager, summarizer, scheduler)
         handlers.register_handlers()
 
-        # Initialize the background task managers.
-        scheduler = DigestScheduler(bot, github_api, db_manager, summarizer)  
+        # Initialize the repository monitor.
         monitor = RepositoryMonitor(github_api, db_manager, scheduler)
 
         # Start the digest scheduler (for daily/weekly notifications).

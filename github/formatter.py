@@ -42,7 +42,7 @@ class RepoFormatter:
 
         # Use the smart AI summary if available, otherwise fall back to the default repo description.
         description = (  
-            ai_summary[:730] + "..." if ai_summary and len(ai_summary) > 730  
+            ai_summary[:2030] + "..." if ai_summary and len(ai_summary) > 2030  
             else ai_summary  
             if ai_summary  
             else repo_data.get("description", "No description available.")  

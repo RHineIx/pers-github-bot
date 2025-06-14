@@ -93,6 +93,13 @@ class DatabaseManager:
                 await conn.execute("DELETE FROM digest_queue")
                 await conn.commit()
             return repo_list
+    
+    async def get_digest_queue_count(self) -> int:
+        """Counts the number of items currently in the digest queue."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute("SELECT COUNT(*) FROM digest_queue")
+            result = await cursor.fetchone()
+            return result[0] if result else 0
 
     # --- Core State & Token Management ---
 
