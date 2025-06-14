@@ -215,3 +215,18 @@ class DatabaseManager:
         async with aiosqlite.connect(self.db_path) as conn:  
             await conn.execute("DELETE FROM bot_state WHERE key = ?", ("bot_state",))  
             await conn.commit()
+
+    async def set_ai_features_enabled(self, enabled: bool) -> None:
+            """Saves the on/off state for AI features."""
+            value_to_store = "1" if enabled else "0"
+            async with aiosqlite.connect(self.db_path) as conn:
+                await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("ai_features_enabled", value_to_store))
+                await conn.commit()
+
+    async def are_ai_features_enabled(self) -> bool:
+        """Checks if AI features are enabled, defaulting to True."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("ai_features_enabled",))
+            result = await cursor.fetchone()
+            # Default to True (1) if the setting is not found
+            return result[0] == "1" if result else True
