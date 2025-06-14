@@ -152,6 +152,10 @@ class BotHandlers:
         elif action == 'toggle_pause':
             await self.db_manager.set_monitoring_paused(not await self.db_manager.is_monitoring_paused())
             await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
+        elif action == 'toggle_ai_features':
+            current_state = await self.db_manager.are_ai_features_enabled()
+            await self.db_manager.set_ai_features_enabled(not current_state)
+            await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
         elif action == 'open_digest_menu':
             await self._send_digest_submenu(call.message.chat.id, call.message.message_id)
         elif action == 'set_digest_mode':
@@ -227,14 +231,23 @@ class BotHandlers:
 
     async def _send_settings_menu(self, chat_id, message_id=None, is_edit=False):
         """Generates the main settings menu."""
-        is_paused, digest_mode = await asyncio.gather(self.db_manager.is_monitoring_paused(), self.db_manager.get_digest_mode())
+        is_paused, digest_mode, ai_enabled = await asyncio.gather(
+            self.db_manager.is_monitoring_paused(),
+            self.db_manager.get_digest_mode(),
+            self.db_manager.are_ai_features_enabled()
+        )
         text = "⚙️ **Bot Settings**\n"
         pause_text = "▶️ Resume" if is_paused else "⏸️ Pause"
         digest_text = f"🔔 Mode: {digest_mode.capitalize()}"
+        ai_text = "🧠 AI Features: ON" if ai_enabled else "🧠 AI Features: OFF"
 
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(InlineKeyboardButton(pause_text, callback_data=CallbackDataManager.create_callback_data('toggle_pause')),
                      InlineKeyboardButton(digest_text, callback_data=CallbackDataManager.create_callback_data('open_digest_menu')))
+        
+        # AI toggle button on its own row
+        keyboard.add(InlineKeyboardButton(ai_text, callback_data=CallbackDataManager.create_callback_data('toggle_ai_features')))
+
         keyboard.add(InlineKeyboardButton("⏱️ Set Interval", callback_data=CallbackDataManager.create_callback_data('open_interval_menu')),
                      InlineKeyboardButton("📍 Manage Destinations", callback_data=CallbackDataManager.create_callback_data('open_dest_menu')))
         keyboard.add(InlineKeyboardButton("🗑️ Remove Token", callback_data=CallbackDataManager.create_callback_data('confirm_remove_token')))

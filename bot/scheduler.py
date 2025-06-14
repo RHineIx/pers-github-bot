@@ -101,6 +101,16 @@ class DigestScheduler:
         if not destinations:
             return
 
+        # --- Send 'typing...' action to all destinations ---
+        typing_tasks = []
+        for target in destinations:
+            chat_id = target.split("/")[0] if "/" in target else target
+            # Add the action task to a list to run concurrently
+            typing_tasks.append(self.bot.send_chat_action(chat_id, 'typing'))
+        
+        # Run all typing actions concurrently without blocking the main flow
+        asyncio.gather(*typing_tasks, return_exceptions=True)
+
         try:
             # 1. Gather all required data concurrently.
             tasks = {
@@ -111,10 +121,19 @@ class DigestScheduler:
             results = await asyncio.gather(*tasks.values())
             res = dict(zip(tasks.keys(), results))
 
-            # 2. Generate AI summary.
+            # 2. Generate AI summary and select media, if enabled.
             ai_summary = None
-            if self.summarizer and res["readme"]:
-                ai_summary = await self.summarizer.summarize_readme(res["readme"])
+            selected_media_urls = []
+            if self.summarizer and await self.db_manager.are_ai_features_enabled():
+                if res["readme"]:
+                    ai_summary = await self.summarizer.summarize_readme(res["readme"])
+                    all_media = extract_media_from_readme(
+                        res["readme"], owner, repo_name, repo_data.get("default_branch", "main")
+                    )
+                    if all_media:
+                        selected_media_urls = await self.summarizer.select_preview_media(
+                            res["readme"], all_media
+                        )
 
             # 3. Format the text caption.
             caption_text = RepoFormatter.format_repository_preview(
