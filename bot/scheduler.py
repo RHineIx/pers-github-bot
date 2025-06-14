@@ -8,7 +8,7 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InputMediaPhoto, InputMediaVideo
+from telebot.types import InputMediaPhoto, InputMediaVideo, InputMediaAnimation
 from telebot.apihelper import ApiTelegramException
 
 from config import config
@@ -135,10 +135,12 @@ class DigestScheduler:
             # 5. Build the media group if URLs were selected.
             if selected_media_urls:
                 for i, url in enumerate(selected_media_urls):
-                    # Caption is only attached to the first item.
                     caption = caption_text if i == 0 else None
-                    # Differentiate between video and photo.
-                    if any(url.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm"]):
+                    url_lower = url.lower()
+
+                    if url_lower.endswith(".gif"):
+                        media_item = InputMediaAnimation(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                    elif any(url_lower.endswith(ext) for ext in [".mp4", ".mov", ".webm"]):
                         media_item = InputMediaVideo(media=url, caption=caption, parse_mode=config.PARSE_MODE)
                     else:
                         media_item = InputMediaPhoto(media=url, caption=caption, parse_mode=config.PARSE_MODE)

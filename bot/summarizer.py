@@ -74,22 +74,24 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
 
         # The prompt for selecting the best visual media.
         prompt = textwrap.dedent(f"""
-            You are a skilled UI/UX analyst with expertise in selecting media that best represent software projects visually.
+            You are an expert UI/UX analyst. Your task is to select the 1 or 2 best media files from a list that visually represent a software project, based on its README file.
 
-            Given the README content and a list of media URLs, your task is to select the top 1 to 2  media files that effectively showcase the project's core functionality and user experience.
+            **CRITICAL RULES for SELECTION:**
 
-            Selection criteria:
-            1. Prioritize screenshots of the actual application (e.g., .png, .jpg), workflow animations (e.g., .gif), or demo videos (e.g., .mp4, .webm) that clearly demonstrate usage.
-            2. Avoid generic logos, badges, or simple static diagrams unless no better options exist.
-            3. Choose media that best engage potential users by providing clear insight into the project's purpose and features.
-            4. Return only a comma-separated list of the selected URLs, ordered by importance. Do not add any additional text or formatting.
+            1.  **Prioritize High-Value Sections:** Give the highest priority to media found under headings like **"Preview", "Demo", "Screenshots", "Showcase", "Features", or "How it works"**. These are most likely to show the project in action.
 
-            **README Content:**
+            2.  **Avoid Irrelevant Sections:** You **MUST IGNORE** any media listed under sections like **"Sponsors", "Contributors", "Donate", "License", or "Badges"**. These are not visual previews of the project.
+
+            3.  **Content is Key:** Choose media that clearly demonstrates the project's purpose, main features, or user interface. Prioritize application screenshots, workflow GIFs, and demo videos. Avoid abstract diagrams or logos unless they are the only option.
+
+            4.  **Output Format:** Return ONLY a comma-separated list of the selected URLs, ordered by importance. Do not add any explanation or other text.
+
+            **README Content to Analyze:**
             ---
             {readme_content[:10000]}
             ---
 
-            **Media URL List:**
+            **List of Media URLs to Choose From:**
             ---
             {formatted_url_list}
             ---

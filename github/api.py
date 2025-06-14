@@ -31,7 +31,9 @@ class GitHubAPI:
         self.base_url = config.GITHUB_API_BASE  
         self.cache_ttl = config.CACHE_TTL_SECONDS  
         # Initialize shared session as None - will be created when needed  
-        self._session = None  
+        self._session = None
+        # Counter to trigger periodic cache cleanup
+        self._request_count = 0
   
     async def _get_session(self) -> aiohttp.ClientSession:  
         """Get or create shared session for connection pooling"""  
@@ -104,17 +106,38 @@ class GitHubAPI:
                 logger.error(f"Unexpected request error for {url}: {e}")  
                 raise GitHubAPIError(500, str(e))  
             raise e  
+
+    def _cleanup_cache(self):
+        """Removes expired entries from the in-memory cache based on CACHE_TTL_SECONDS."""
+        now = time.time()
+        # Create a list of keys to delete to avoid changing dict size during iteration
+        expired_keys = [
+            key for key, (timestamp, _, _) in self._cache.items()
+            if now - timestamp > self.cache_ttl
+        ]
+        if expired_keys:
+            for key in expired_keys:
+                # Check if key still exists before deleting
+                if key in self._cache:
+                    del self._cache[key]
+            logger.info(f"Cache cleanup: Removed {len(expired_keys)} expired entries.")
       
     async def _make_cached_request(self, endpoint: str) -> Optional[Any]:  
-        # Generic wrapper for API calls that should be cached using E-Tags.  
+        # Generic wrapper for API calls that should be cached using E-Tags.
+
+        # Periodically clean up the cache to prevent it from growing indefinitely
+        self._request_count += 1
+        if self._request_count % 50 == 0:
+            self._cleanup_cache()
+
         cache_key = endpoint  
         cached_entry = self._cache.get(cache_key)  
         etag = None  
   
         if cached_entry:  
             timestamp, etag, cached_data = cached_entry  
-            # For very recent requests (<60s), serve directly from cache to save an API call.  
-            if time.time() - timestamp < 60:  
+            # For very recent requests (<5m), serve directly from cache to save an API call.  
+            if time.time() - timestamp < 300:  
                  return cached_data  
           
         try:  

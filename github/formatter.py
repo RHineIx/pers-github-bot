@@ -74,6 +74,15 @@ class RepoFormatter:
                 ]
             )
 
+        # Format Topics, to be placed at the bottom
+        topics = repo_data.get("topics", [])[:4]
+        topics_text = ""
+        if topics:
+            formatted_topics = " ".join([f"<code>#{topic}</code>" for topic in topics])
+            # Add newlines for spacing below the main content
+            topics_text = f"\n\n{formatted_topics}"
+
+
         # The final HTML message template.
         message = f"""📦 <a href='{html_url}'>{full_name}</a>
 
@@ -86,7 +95,7 @@ class RepoFormatter:
 ⏳ <b>Last updated:</b> {last_updated_str}
 💻 <b>Langs:</b> {languages_text}
 
-<a href='{html_url}'>🔗 View on GitHub</a>
+<a href='{html_url}'>🔗 View on GitHub</a>{topics_text}
 """
         return message.strip()
 
