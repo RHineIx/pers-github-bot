@@ -79,7 +79,7 @@ async def main():
         handlers.register_handlers()
 
         # Initialize the repository monitor.
-        monitor = RepositoryMonitor(github_api, db_manager, scheduler)
+        monitor = RepositoryMonitor(bot, github_api, db_manager, scheduler)
 
         # Start the digest scheduler (for daily/weekly notifications).
         scheduler.start()
@@ -102,6 +102,9 @@ async def main():
         if scheduler and scheduler.scheduler.running:
             scheduler.scheduler.shutdown()
             logger.info("Digest scheduler has been shut down.")
+        if 'github_api' in locals() and github_api:
+            await github_api.close()
+            logger.info("GitHub API session has been closed.")
         logger.info("Bot has stopped.")
 
 

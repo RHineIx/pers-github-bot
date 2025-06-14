@@ -92,7 +92,6 @@ class DigestScheduler:
                 )
 
     async def _process_and_send_notification(self, repo_data: dict):
-        # This is the full notification logic, reusable for each item in the digest.
         owner, repo_name = repo_data.get("owner", {}).get("login"), repo_data.get("name")
         if not owner or not repo_name:
             return
@@ -101,18 +100,11 @@ class DigestScheduler:
         if not destinations:
             return
 
-        # --- Send 'typing...' action to all destinations ---
-        typing_tasks = []
-        for target in destinations:
-            chat_id = target.split("/")[0] if "/" in target else target
-            # Add the action task to a list to run concurrently
-            typing_tasks.append(self.bot.send_chat_action(chat_id, 'typing'))
-        
-        # Run all typing actions concurrently without blocking the main flow
+        typing_tasks = [self.bot.send_chat_action(target.split("/")[0] if "/" in target else target, 'typing') for target in destinations]
         asyncio.gather(*typing_tasks, return_exceptions=True)
 
         try:
-            # 1. Gather all required data concurrently.
+            # Step 1: Gather all required data concurrently
             tasks = {
                 "languages": self.github_api.get_repository_languages(owner, repo_name),
                 "release": self.github_api.get_latest_release(owner, repo_name),
@@ -121,39 +113,33 @@ class DigestScheduler:
             results = await asyncio.gather(*tasks.values())
             res = dict(zip(tasks.keys(), results))
 
-            # 2. Generate AI summary and select media, if enabled.
+            # Step 2: Generate AI summary and conditionally select media (Unified & Correct Logic)
             ai_summary = None
             selected_media_urls = []
             if self.summarizer and await self.db_manager.are_ai_features_enabled():
                 if res["readme"]:
                     ai_summary = await self.summarizer.summarize_readme(res["readme"])
-                    all_media = extract_media_from_readme(
-                        res["readme"], owner, repo_name, repo_data.get("default_branch", "main")
-                    )
-                    if all_media:
-                        selected_media_urls = await self.summarizer.select_preview_media(
-                            res["readme"], all_media
+                    
+                    # Media selection now correctly respects the toggle
+                    if await self.db_manager.is_ai_media_selection_enabled():
+                        all_media = extract_media_from_readme(
+                            res["readme"], owner, repo_name, repo_data.get("default_branch", "main")
                         )
+                        if all_media:
+                            selected_media_urls = await self.summarizer.select_preview_media(
+                                res["readme"], all_media
+                            )
 
-            # 3. Format the text caption.
+            # Step 3: Format the text caption
             caption_text = RepoFormatter.format_repository_preview(
                 repo_data, res["languages"], res["release"], ai_summary
             )
 
-            # 4. Extract and select media for the album.
-            media_group, selected_media_urls = [], []
-            if self.summarizer and res["readme"]:
-                all_media = extract_media_from_readme(
-                    res["readme"], owner, repo_name, repo_data.get("default_branch", "main")
-                )
-                if all_media:
-                    selected_media_urls = await self.summarizer.select_preview_media(
-                        res["readme"], all_media
-                    )
-            
-            # 5. Build the media group if URLs were selected.
+            # Step 4: Build the media group if URLs were selected
+            media_group = []
             if selected_media_urls:
                 for i, url in enumerate(selected_media_urls):
+                    # The caption is now assigned directly from caption_text
                     caption = caption_text if i == 0 else None
                     url_lower = url.lower()
 
@@ -165,7 +151,7 @@ class DigestScheduler:
                         media_item = InputMediaPhoto(media=url, caption=caption, parse_mode=config.PARSE_MODE)
                     media_group.append(media_item)
 
-            # 6. Send to all destinations.
+            # Step 5: Send notifications to all destinations
             for target in destinations:
                 try:
                     chat_id, thread_id = (
@@ -174,39 +160,33 @@ class DigestScheduler:
                         else (target, None)
                     )
                     if media_group:
-                        # Send as a media group album if media is available.
                         await self.bot.send_media_group(
                             chat_id=chat_id, media=media_group, message_thread_id=thread_id
                         )
                     else:
-                        # Fallback to a text-only message if no media.
                         await self.bot.send_message(
                             chat_id=chat_id,
                             text=caption_text,
                             parse_mode=config.PARSE_MODE,
-                            disable_web_page_preview=False, # Attempt with preview first
+                            disable_web_page_preview=False,
                             message_thread_id=thread_id,
                         )
                 except ApiTelegramException as e:
-                    # This is the new part to handle the error smartly
                     if "WEBPAGE_CURL_FAILED" in e.description:
-                        logger.warning(f"WEBPAGE_CURL_FAILED for {owner, repo_name}. Retrying without preview/media.")
+                        logger.warning(f"WEBPAGE_CURL_FAILED for {owner, repo_name}. Retrying without preview.")
                         try:
-                            # Retry sending as a simple text message with web page preview disabled
                             await self.bot.send_message(
                                 chat_id=chat_id,
                                 text=caption_text,
                                 parse_mode=config.PARSE_MODE,
-                                disable_web_page_preview=True, # Disable preview on retry
+                                disable_web_page_preview=True,
                                 message_thread_id=thread_id,
                             )
                         except Exception as final_e:
                             logger.error(f"Failed to send notification to {target} even after retry: {final_e}")
                     else:
-                        # For any other API error, just log it
                         logger.error(f"Failed to send notification to destination {target}: {e}")
                 except Exception as e:
-                    # For non-API errors
                     logger.error(f"An unexpected error occurred sending to {target} for {owner, repo_name}: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to process and send notification for {owner, repo_name}: {e}", exc_info=True)

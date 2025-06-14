@@ -10,7 +10,9 @@ from typing import Optional
 from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI, GitHubAPIError
-from bot.scheduler import DigestScheduler  # Import scheduler for dependency
+from bot.scheduler import DigestScheduler 
+from telebot.async_telebot import AsyncTeleBot
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +20,12 @@ logger = logging.getLogger(__name__)
 class RepositoryMonitor:
     def __init__(
         self,
+        bot: AsyncTeleBot,
         github_api: GitHubAPI,
         db_manager: DatabaseManager,
-        scheduler: DigestScheduler, # Now depends on the scheduler for instant notifications
+        scheduler: DigestScheduler,
     ):
+        self.bot = bot
         self.github_api = github_api
         self.db_manager = db_manager
         self.scheduler = scheduler
@@ -105,12 +109,29 @@ class RepositoryMonitor:
             await self.db_manager.clear_last_error()
 
         except GitHubAPIError as e:
-            # Smart error handling for invalid tokens.
             if e.status_code == 401:
-                logger.error("GitHub token is invalid. Pausing monitoring.")
+                logger.error("GitHub token is invalid or expired. Notifying owner and pausing monitoring.")
+                
                 await self.db_manager.set_monitoring_paused(True)
-                error_msg = "Your GitHub token is invalid. Monitoring automatically paused."
+                error_msg = "Your GitHub token is invalid or has expired. Monitoring has been automatically paused."
                 await self.db_manager.update_last_error(error_msg)
+                try:
+                    notification_text = (
+                        "⚠️ **GitHub Token Error**\n\n"
+                        "Your GitHub token is either invalid or has expired. "
+                        "The bot has paused monitoring your stars.\n\n"
+                        "Please generate a new token and use the following command to resume:\n"
+                        "`/settoken <Your_New_Token>`"
+                    )
+                    await self.bot.send_message(
+                        config.OWNER_USER_ID, 
+                        notification_text, 
+                        parse_mode="Markdown"
+                    )
+                    logger.info("Successfully sent token error notification to the owner.")
+                except Exception as notify_err:
+                    logger.error(f"FATAL: Failed to send token error notification to owner: {notify_err}")
+
             else:
                 logger.error(f"A GitHub API error occurred during check: {e}")
         except Exception as e:

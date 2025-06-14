@@ -6,6 +6,7 @@ import textwrap
 from typing import Optional, List
 
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 from config import config
 
@@ -20,7 +21,24 @@ class AISummarizer:
         genai.configure(api_key=api_key)
         
         logger.info(f"Initializing Gemini with model: {config.GEMINI_MODEL_NAME}")
-        self.model = genai.GenerativeModel(config.GEMINI_MODEL_NAME)
+        
+        # This tells the model not to block content for these specific categories.
+        # Use with caution.
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        }
+
+        
+        # Pass the safety settings during model initialization
+        self.model = genai.GenerativeModel(
+            config.GEMINI_MODEL_NAME, 
+            safety_settings=safety_settings
+        )
+
+
 
     async def summarize_readme(self, readme_content: str) -> Optional[str]:
         # Generates a smart, character-limited summary of a README file.
@@ -46,7 +64,7 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
 
 **Original README content to process:**
 ---
-            {readme_content[:15000]}
+            {readme_content[:12000]}
             ---
         """) # Truncate content to avoid exceeding token limits.
 
@@ -54,6 +72,8 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
             logger.info("Sending README content to Gemini for summarization...")
             response = await self.model.generate_content_async(prompt)
             summary = response.text.strip().strip('"')
+            if len(summary) > 730:
+                summary = summary[:727].rstrip() + "…"
             logger.info("Successfully received summary from Gemini.")
             return summary
         except Exception as e:
@@ -66,6 +86,12 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
         # Selects the best 1-3 media URLs from a list based on README context.
         if not media_urls:
             return []
+        # Filter out media that are likely unhelpful (e.g., badges, donate buttons, logos)
+        excluded_keywords = ["badge", "sponsor", "donate", "logo", "contributor"]
+        media_urls = [
+            url for url in media_urls
+            if not any(keyword in url.lower() for keyword in excluded_keywords)
+        ]
 
         # Convert the list of URLs into a numbered string for the prompt.
         formatted_url_list = "\n".join(
@@ -88,7 +114,7 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
 
             **README Content to Analyze:**
             ---
-            {readme_content[:10000]}
+            {readme_content[:9000]}
             ---
 
             **List of Media URLs to Choose From:**
@@ -100,6 +126,11 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
         try:
             logger.info("Asking Gemini to select the best preview media...")
             response = await self.model.generate_content_async(prompt)
+            logger.debug(f"Raw Gemini response for media selection: {response}")
+            
+            if not response.parts:
+                logger.warning("Gemini response for media selection is empty or blocked.")
+                return []
             
             # Clean up the response: remove whitespace and split by comma.
             selected_urls = [

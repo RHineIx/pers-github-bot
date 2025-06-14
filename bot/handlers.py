@@ -156,6 +156,10 @@ class BotHandlers:
             current_state = await self.db_manager.are_ai_features_enabled()
             await self.db_manager.set_ai_features_enabled(not current_state)
             await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
+        elif action == 'toggle_ai_media_selection':
+            current_state = await self.db_manager.is_ai_media_selection_enabled()
+            await self.db_manager.set_ai_media_selection_enabled(not current_state)
+            await self._send_settings_menu(call.message.chat.id, call.message.message_id, is_edit=True)
         elif action == 'open_digest_menu':
             await self._send_digest_submenu(call.message.chat.id, call.message.message_id)
         elif action == 'set_digest_mode':
@@ -192,24 +196,72 @@ class BotHandlers:
             await self._handle_destination_input(message)
 
     async def _handle_destination_input(self, message: Message):
-        """Processes the received text as a new destination ID."""
+        """Processes the text received after the user clicks 'Add Destination' in settings."""
         target_id_str = message.text.strip()
         
-        if target_id_str.startswith('-'):
-            try:
-                test_msg = await self.bot.send_message(target_id_str, "✅ Bot permission test...")
-                await self.bot.delete_message(test_msg.chat.id, test_msg.message_id)
-            except ApiTelegramException as e:
-                await self.bot.reply_to(message, f"❌ Failed to add destination.\n*Reason:* `{e.description}`")
-                await self.db_manager.clear_bot_state(); return
+        # Use the new validation helper function
+        success = await self._validate_and_add_destination(message, target_id_str)
         
-        await self.db_manager.add_destination(target_id_str)
+        # Always clear the state after an attempt
         await self.db_manager.clear_bot_state()
+        
+        # Clean up user's message and confirmation prompt
         await self.bot.delete_message(message.chat.id, message.message_id)
-        conf_msg = await self.bot.send_message(message.chat.id, f"✅ Destination `{target_id_str}` added. Re-opening settings...")
-        await asyncio.sleep(2)
-        await self.bot.delete_message(conf_msg.chat.id, conf_msg.message_id)
-        await self._send_settings_menu(message.chat.id)
+        
+        # Re-open the settings menu
+        last_settings_msg_id = self._last_settings_message_id.get(message.chat.id)
+        if last_settings_msg_id:
+            await self._send_destinations_submenu(message.chat.id, last_settings_msg_id)
+        else:
+            await self._send_settings_menu(message.chat.id)
+
+    async def _validate_and_add_destination(self, message: Message, target_id_str: str):
+        """
+        Validates a destination ID (including topics), then adds it to the DB.
+        Returns True on success, False on failure.
+        """
+        try:
+            chat_id_str = target_id_str
+            thread_id = None
+
+            # Check if the ID string contains a topic ID
+            if "/" in target_id_str:
+                parts = target_id_str.split('/')
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    chat_id_str = parts[0]
+                    # This can raise ValueError if not a number
+                    thread_id = int(parts[1])
+                else:
+                    raise ValueError("Invalid format.")
+
+            # Convert the chat ID to an integer before making the API call.
+            # This is crucial for topics to work correctly.
+            chat_id_int = int(chat_id_str)
+
+            # Send a test message to the specific topic or chat
+            test_msg = await self.bot.send_message(
+                chat_id_int, 
+                "✅ Verifying destination...", 
+                message_thread_id=thread_id
+            )
+            await self.bot.delete_message(test_msg.chat.id, test_msg.message_id)
+
+        except ValueError:
+            await self.bot.reply_to(message, f"❌ **Failed:** Invalid ID format.\nProvided: `{target_id_str}`\n\n_Use `CHAT_ID` or `CHAT_ID/TOPIC_ID` format._", parse_mode="Markdown")
+            return False
+        except ApiTelegramException as e:
+            reply_text = (
+                f"❌ **Failed to add destination** `{target_id_str}`\n"
+                f"*Reason:* `{e.description}`\n\n"
+                "_Please make sure the bot is a member and has permissions in the specified chat/topic._"
+            )
+            await self.bot.reply_to(message, reply_text, parse_mode="Markdown")
+            return False
+
+        # If all validations pass, add the original, full string to the database
+        await self.db_manager.add_destination(target_id_str)
+        await self.bot.reply_to(message, f"✅ **Destination added:** `{target_id_str}`", parse_mode="Markdown")
+        return True
 
     async def _send_or_edit_menu(self, chat_id, text, keyboard, message_id=None, is_edit=False):
         """Helper function to safely send or edit a menu message."""
@@ -231,25 +283,32 @@ class BotHandlers:
 
     async def _send_settings_menu(self, chat_id, message_id=None, is_edit=False):
         """Generates the main settings menu."""
-        is_paused, digest_mode, ai_enabled = await asyncio.gather(
+        is_paused, digest_mode, ai_enabled, ai_media_select_enabled = await asyncio.gather(
             self.db_manager.is_monitoring_paused(),
             self.db_manager.get_digest_mode(),
-            self.db_manager.are_ai_features_enabled()
+            self.db_manager.are_ai_features_enabled(),
+            self.db_manager.is_ai_media_selection_enabled() # Fetch new setting state
         )
         text = "⚙️ **Bot Settings**\n"
         pause_text = "▶️ Resume" if is_paused else "⏸️ Pause"
         digest_text = f"🔔 Mode: {digest_mode.capitalize()}"
         ai_text = "🧠 AI Features: ON" if ai_enabled else "🧠 AI Features: OFF"
+        # New button text
+        ai_media_text = "🖼️ AI Media Select: ON" if ai_media_select_enabled else "🖼️ AI Media Select: OFF"
 
         keyboard = InlineKeyboardMarkup(row_width=2)
-        keyboard.add(InlineKeyboardButton(pause_text, callback_data=CallbackDataManager.create_callback_data('toggle_pause')),
-                     InlineKeyboardButton(digest_text, callback_data=CallbackDataManager.create_callback_data('open_digest_menu')))
+        keyboard.add(
+            InlineKeyboardButton(pause_text, callback_data=CallbackDataManager.create_callback_data('toggle_pause')),
+            InlineKeyboardButton(digest_text, callback_data=CallbackDataManager.create_callback_data('open_digest_menu'))
+        )
         
-        # AI toggle button on its own row
         keyboard.add(InlineKeyboardButton(ai_text, callback_data=CallbackDataManager.create_callback_data('toggle_ai_features')))
+        keyboard.add(InlineKeyboardButton(ai_media_text, callback_data=CallbackDataManager.create_callback_data('toggle_ai_media_selection')))
 
-        keyboard.add(InlineKeyboardButton("⏱️ Set Interval", callback_data=CallbackDataManager.create_callback_data('open_interval_menu')),
-                     InlineKeyboardButton("📍 Manage Destinations", callback_data=CallbackDataManager.create_callback_data('open_dest_menu')))
+        keyboard.add(
+            InlineKeyboardButton("⏱️ Set Interval", callback_data=CallbackDataManager.create_callback_data('open_interval_menu')),
+            InlineKeyboardButton("📍 Manage Destinations", callback_data=CallbackDataManager.create_callback_data('open_dest_menu'))
+        )
         keyboard.add(InlineKeyboardButton("🗑️ Remove Token", callback_data=CallbackDataManager.create_callback_data('confirm_remove_token')))
         keyboard.add(InlineKeyboardButton("Close Menu", callback_data=CallbackDataManager.create_callback_data('close')))
         await self._send_or_edit_menu(chat_id, text, keyboard, message_id, is_edit)
@@ -447,9 +506,16 @@ class BotHandlers:
         command = message.text.split()[0]
         
         if command == '/add_dest':
-            if not await self.db_manager.token_exists(): await self.bot.reply_to(message, "Set token first."); return
+            if not await self.db_manager.token_exists():
+                await self.bot.reply_to(message, "Set token first.")
+                return
+            
             parts = message.text.split(" ", 1)
+            # Default to the current user's chat if no ID is provided
             target_id_str = str(message.from_user.id) if len(parts) == 1 else parts[1].strip()
+
+            # Use the new validation helper function
+            await self._validate_and_add_destination(message, target_id_str)
 
             if target_id_str.startswith('-'):
                 try:

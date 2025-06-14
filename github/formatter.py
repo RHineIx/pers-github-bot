@@ -2,6 +2,7 @@
 
 import re
 from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 from telebot import types
 from telebot.util import quick_markup
@@ -42,7 +43,7 @@ class RepoFormatter:
 
         # Use the smart AI summary if available, otherwise fall back to the default repo description.
         description = (  
-            ai_summary[:2030] + "..." if ai_summary and len(ai_summary) > 2030  
+            ai_summary[:730] + "..." if ai_summary and len(ai_summary) > 730  
             else ai_summary  
             if ai_summary  
             else repo_data.get("description", "No description available.")  
@@ -53,7 +54,13 @@ class RepoFormatter:
         issues = repo_data.get("open_issues_count", 0)
         
         pushed_at = repo_data.get("pushed_at")
-        last_updated_str = format_time_ago(pushed_at)
+        if pushed_at:
+            date_obj = datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
+            absolute_date_str = date_obj.strftime('%Y-%m-%d')
+            relative_time_str = format_time_ago(pushed_at)
+            last_updated_str = f"{absolute_date_str} ({relative_time_str})"
+        else:
+            last_updated_str = "N/A"
 
         release_info = "No official releases"
         if latest_release:
@@ -78,16 +85,14 @@ class RepoFormatter:
         topics = repo_data.get("topics", [])[:4]
         topics_text = ""
         if topics:
-            formatted_topics = " ".join([f"#{topic}" for topic in topics])
-            # Add newlines for spacing below the main content
+            formatted_topics = " ".join([f"#{topic.replace('-', '_')}" for topic in topics])
             topics_text = f"\n\n{formatted_topics}"
 
 
         # The final HTML message template.
         message = f"""📦 <a href='{html_url}'>{full_name}</a>
 
-📝 <b>Description:</b>
-<blockquote expandable>{description}</blockquote>
+<blockquote expandable>📝 {description}</blockquote>
 
 ⭐ <b>Stars:</b> {stars} | 🍴 <b>Forks:</b> {forks} | 🪲 <b>Open Issues:</b> {issues}
 

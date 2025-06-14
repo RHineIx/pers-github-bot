@@ -8,6 +8,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from collections import OrderedDict
+from urllib.parse import urlparse
 
 # Formats a duration in seconds into a human-readable string (e.g., "3600 seconds (1.0 hours)").
 def format_duration(seconds: int) -> str:
@@ -64,35 +65,43 @@ def extract_media_from_readme(
     if not markdown_text:
         return []
 
-    # Regex to find both Markdown `![alt](url)` and HTML `<img src="url">` tags.
-    image_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]'
-    found_urls = re.findall(image_pattern, markdown_text)
-
-    # Flatten the list of tuples from regex groups and filter out empty matches.
+    media_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]|<video.*?src=[\'"](.*?)[\'"]'
+    found_urls = re.findall(media_pattern, markdown_text)
     urls = [url for group in found_urls for url in group if url]
 
     absolute_urls = []
     for url in urls:
         url = url.strip()
-        # If the URL is already absolute, use it directly.
         if url.startswith("http://") or url.startswith("https://"):
+            # Handle GitHub blob URLs (e.g. /blob/main/video.mp4)
+            if "github.com" in url and "/blob/" in url:
+                url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
             absolute_urls.append(url)
-        # Otherwise, resolve the relative path to a full GitHub raw content URL.
         else:
+            # Relative URL
             clean_path = url.lstrip("./").lstrip("/")
             absolute_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{clean_path}"
             absolute_urls.append(absolute_url)
 
-    # Filter the final list to include only supported media file types.
     valid_media_extensions = (
-        ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".mp4", ".mov", ".webm",
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm",
     )
-    valid_urls = [
-        url for url in absolute_urls if url.lower().endswith(valid_media_extensions)
-    ]
+
+    excluded_keywords = ("badge", "sponsor", "donate", "logo", "contributor")
+
+    valid_urls = []
+    for url in absolute_urls:
+        try:
+            parsed_path = urlparse(url).path.lower()
+            if parsed_path.endswith(valid_media_extensions):
+                if not any(kw in parsed_path for kw in excluded_keywords):
+                    valid_urls.append(url)
+        except Exception:
+            continue
 
     return valid_urls
+
+
 
 # Manages callback data to overcome Telegram's 64-byte limit.
 class CallbackDataManager:
