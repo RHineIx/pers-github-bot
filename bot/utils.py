@@ -101,8 +101,6 @@ def extract_media_from_readme(
 
     return valid_urls
 
-
-
 # Manages callback data to overcome Telegram's 64-byte limit.
 class CallbackDataManager:
     _data_store: Dict[str, tuple] = OrderedDict()

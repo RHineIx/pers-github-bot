@@ -25,12 +25,11 @@ class AISummarizer:
         # This tells the model not to block content for these specific categories.
         # Use with caution.
         safety_settings = {
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
-
         
         # Pass the safety settings during model initialization
         self.model = genai.GenerativeModel(
@@ -86,12 +85,6 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
         # Selects the best 1-3 media URLs from a list based on README context.
         if not media_urls:
             return []
-        # Filter out media that are likely unhelpful (e.g., badges, donate buttons, logos)
-        excluded_keywords = ["badge", "sponsor", "donate", "logo", "contributor"]
-        media_urls = [
-            url for url in media_urls
-            if not any(keyword in url.lower() for keyword in excluded_keywords)
-        ]
 
         # Convert the list of URLs into a numbered string for the prompt.
         formatted_url_list = "\n".join(
@@ -100,7 +93,7 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
 
         # The prompt for selecting the best visual media.
         prompt = textwrap.dedent(f"""
-            You are an expert UI/UX analyst. Your task is to select the 1 or 2 best media files from a list that visually represent a software project, based on its README file.
+            You are an expert UI/UX analyst. Your task is to "select the 1 or 3 best media" files from a list that visually represent a software project, based on its README file.
 
             **CRITICAL RULES for SELECTION:**
 
@@ -138,7 +131,7 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
             ]
             
             logger.info(f"Gemini selected {len(selected_urls)} media URLs.")
-            return selected_urls[:2]  # Enforce the max limit of 2.
+            return selected_urls[:3]  # Enforce the max limit of 3.
         except Exception as e:
             logger.error(f"Error during media selection with Gemini API: {e}")
             return []
