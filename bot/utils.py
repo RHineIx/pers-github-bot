@@ -5,8 +5,9 @@ import re
 import json
 import time
 import hashlib
+import aiohttp
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from collections import OrderedDict
 from urllib.parse import urlparse
 
@@ -93,7 +94,9 @@ def extract_media_from_readme(
     for url in absolute_urls:
         try:
             parsed_path = urlparse(url).path.lower()
-            if parsed_path.endswith(valid_media_extensions):
+
+            is_github_asset = "github.com" in url and "/assets/" in url
+            if parsed_path.endswith(valid_media_extensions) or is_github_asset:
                 if not any(kw in parsed_path for kw in excluded_keywords):
                     valid_urls.append(url)
         except Exception:
@@ -131,3 +134,24 @@ class CallbackDataManager:
         # Retrieves the full data dictionary from its hash.
         stored = cls._data_store.get(data_hash)
         return stored[1] if stored else None
+    
+
+async def get_media_info(url: str, session: aiohttp.ClientSession) -> Tuple[Optional[str], str]:
+    """
+    Makes a HEAD request to a URL to get its Content-Type and final redirected URL.
+    Returns a tuple of (content_type, final_url).
+    """
+    if not url or not url.startswith('http'):
+        return None, url
+    try:
+        async with session.head(url, timeout=15, allow_redirects=True) as response:
+            # The final URL after redirects is in response.url
+            final_url = str(response.url)
+            if response.status == 200:
+                content_type = response.headers.get('Content-Type', '').lower()
+                return content_type, final_url
+            # If status is not 200, return None for type but provide the final URL
+            return None, final_url
+    except Exception:
+        # On any exception, return None for type and the original URL
+        return None, url

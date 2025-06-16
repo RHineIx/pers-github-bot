@@ -1,7 +1,8 @@
 # In bot/telegram_log_handler.py
 import logging
 import traceback
-import telebot # We use the synchronous version here for simplicity in a logging handler.
+import telebot
+import html
 
 class TelegramLogHandler(logging.Handler):
     """
@@ -22,11 +23,12 @@ class TelegramLogHandler(logging.Handler):
         """
         # Format the log record into a string.
         log_entry = self.format(record)
+        safe_log_entry = html.escape(log_entry)
         
         # Prepare a clean message for Telegram.
         # HTML for better formatting.
         message = f"<b>⭕ ERROR ⭕</b>\n\n"
-        message += f"<pre>{log_entry}</pre>"
+        message += f"<pre>{safe_log_entry}</pre>"
         
         # Truncate the message if it's too long for Telegram.
         if len(message) > 4096:

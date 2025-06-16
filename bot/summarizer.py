@@ -70,6 +70,12 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
         try:
             logger.info("Sending README content to Gemini for summarization...")
             response = await self.model.generate_content_async(prompt)
+            if not response.parts:
+                reason = "Unknown"
+                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                    reason = str(response.prompt_feedback.block_reason)
+                logger.warning(f"Gemini summary response was empty or blocked. Reason: {reason}")
+                return None
             summary = response.text.strip().strip('"')
             if len(summary) > 730:
                 summary = summary[:727].rstrip() + "…"
@@ -107,7 +113,7 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
 
             **README Content to Analyze:**
             ---
-            {readme_content[:9000]}
+            {readme_content[:10000]}
             ---
 
             **List of Media URLs to Choose From:**
@@ -122,7 +128,10 @@ You are a text processing AI assistant. Your task is to extract and slightly ref
             logger.debug(f"Raw Gemini response for media selection: {response}")
             
             if not response.parts:
-                logger.warning("Gemini response for media selection is empty or blocked.")
+                reason = "Unknown"
+                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                    reason = str(response.prompt_feedback.block_reason)
+                logger.warning(f"Gemini media selection response was empty or blocked. Reason: {reason}")
                 return []
             
             # Clean up the response: remove whitespace and split by comma.

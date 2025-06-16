@@ -5,6 +5,8 @@
 import asyncio
 import logging
 from typing import Optional
+from urllib.parse import urlparse
+import aiohttp
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telebot.async_telebot import AsyncTeleBot
@@ -16,7 +18,7 @@ from bot.database import DatabaseManager
 from github.api import GitHubAPI
 from github.formatter import RepoFormatter
 from bot.summarizer import AISummarizer
-from bot.utils import extract_media_from_readme
+from bot.utils import extract_media_from_readme, get_media_info
 
 logger = logging.getLogger(__name__)
 
@@ -138,18 +140,36 @@ class DigestScheduler:
             # Step 4: Build the media group if URLs were selected
             media_group = []
             if selected_media_urls:
-                for i, url in enumerate(selected_media_urls):
-                    # The caption is now assigned directly from caption_text
-                    caption = caption_text if i == 0 else None
-                    url_lower = url.lower()
+                async with aiohttp.ClientSession() as session:
+                    for i, url in enumerate(selected_media_urls):
+                        caption = caption_text if i == 0 else None
+                        
+                        # Get both content type and the final URL after redirects
+                        content_type, final_url = await get_media_info(url, session)
+                        logger.info(f"Original URL: {url}, Final URL: {final_url}, Content-Type: {content_type}")
 
-                    if url_lower.endswith(".gif"):
-                        media_item = InputMediaAnimation(media=url, caption=caption, parse_mode=config.PARSE_MODE)
-                    elif any(url_lower.endswith(ext) for ext in [".mp4", ".mov", ".webm"]):
-                        media_item = InputMediaVideo(media=url, caption=caption, parse_mode=config.PARSE_MODE)
-                    else:
-                        media_item = InputMediaPhoto(media=url, caption=caption, parse_mode=config.PARSE_MODE)
-                    media_group.append(media_item)
+                        # First, try to classify by Content-Type
+                        media_item = None
+                        if content_type:
+                            if 'video' in content_type:
+                                media_item = InputMediaVideo(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                            elif 'gif' in content_type:
+                                media_item = InputMediaAnimation(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                            elif 'image' in content_type:
+                                media_item = InputMediaPhoto(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                        
+                        # If Content-Type was not decisive, fallback to checking the final URL's extension
+                        if not media_item:
+                            parsed_path = urlparse(final_url).path.lower()
+                            if any(parsed_path.endswith(ext) for ext in [".mp4", ".mov", ".webm"]):
+                                media_item = InputMediaVideo(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                            elif parsed_path.endswith(".gif"):
+                                media_item = InputMediaAnimation(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+                            else:
+                                # Ultimate fallback is to treat as a photo
+                                media_item = InputMediaPhoto(media=url, caption=caption, parse_mode=config.PARSE_MODE)
+
+                        media_group.append(media_item)
 
             # Step 5: Send notifications to all destinations
             for target in destinations:
@@ -159,7 +179,18 @@ class DigestScheduler:
                         if "/" in target
                         else (target, None)
                     )
-                    if media_group:
+
+                    animation_item = next((item for item in media_group if isinstance(item, InputMediaAnimation)), None)
+
+                    if animation_item:
+                        await self.bot.send_animation(
+                            chat_id=chat_id,
+                            animation=animation_item.media,
+                            caption=caption_text,
+                            parse_mode=config.PARSE_MODE,
+                            message_thread_id=thread_id,
+                        )
+                    elif media_group:
                         await self.bot.send_media_group(
                             chat_id=chat_id, media=media_group, message_thread_id=thread_id
                         )
@@ -186,7 +217,5 @@ class DigestScheduler:
                             logger.error(f"Failed to send notification to {target} even after retry: {final_e}")
                     else:
                         logger.error(f"Failed to send notification to destination {target}: {e}")
-                except Exception as e:
-                    logger.error(f"An unexpected error occurred sending to {target} for {owner, repo_name}: {e}", exc_info=True)
         except Exception as e:
-            logger.error(f"Failed to process and send notification for {owner, repo_name}: {e}", exc_info=True)
+            logger.error(f"An unexpected error occurred sending to {target} for {owner, repo_name}: {e}", exc_info=True)
