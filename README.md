@@ -1,7 +1,6 @@
 # Personal AI-Powered GitHub Stars Bot
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Telegram Bot API](https://img.shields.io/badge/API-pyTelegramBotAPI-red.svg)
 
 
