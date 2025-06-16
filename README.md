@@ -118,7 +118,10 @@ BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 OWNER_USER_ID="123456789"
 GEMINI_API_KEY="AIzaSy...your_gemini_key"
 
-# Optional: Change the AI model if needed
+# Optional: For error logging
+LOG_CHANNEL_ID="-100123456789"
+
+# Optional: For tweaking Gemini's behavior
 # GEMINI_MODEL_NAME="gemini-1.5-pro-latest"
 ```
 
