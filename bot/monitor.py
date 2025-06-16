@@ -13,6 +13,9 @@ from github.api import GitHubAPI, GitHubAPIError
 from bot.scheduler import DigestScheduler 
 from telebot.async_telebot import AsyncTeleBot
 from config import config
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from bot.notifier import Notifier
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +26,12 @@ class RepositoryMonitor:
         bot: AsyncTeleBot,
         github_api: GitHubAPI,
         db_manager: DatabaseManager,
-        scheduler: DigestScheduler,
+        notifier: "Notifier",
     ):
         self.bot = bot
         self.github_api = github_api
         self.db_manager = db_manager
-        self.scheduler = scheduler
+        self.notifier = notifier
         self.is_monitoring = False
 
     async def start_monitoring(self):
@@ -86,16 +89,14 @@ class RepositoryMonitor:
                 logger.info(f"Found {len(new_starred_repos)} new starred repositories.")
                 digest_mode = await self.db_manager.get_digest_mode()
 
-                # Reverse the list to process them in the order they were starred.
                 new_starred_repos.reverse()
                 
-                # Based on the user's setting, either send instantly or queue for digest.
                 if digest_mode == "off":
                     logger.info("Digest mode is OFF. Sending notifications instantly...")
                     for repo in new_starred_repos:
-                        # Call the notification logic directly from the scheduler to avoid code duplication.
-                        await self.scheduler._process_and_send_notification(repo)
-                        await asyncio.sleep(2) # A small delay between instant sends.
+                        # --- It now calls the notifier directly ---
+                        await self.notifier.send_repo_notification(repo)
+                        await asyncio.sleep(2)
                 else:
                     logger.info(f"Digest mode is '{digest_mode}'. Adding new repos to the queue.")
                     for repo in new_starred_repos:

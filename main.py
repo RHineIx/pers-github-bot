@@ -8,10 +8,11 @@ from config import config
 from bot.database import DatabaseManager
 from github.api import GitHubAPI
 from bot.monitor import RepositoryMonitor
-from bot.handlers import BotHandlers
+from bot.handlers.handlers import BotHandlers
 from bot.summarizer import AISummarizer
 from bot.scheduler import DigestScheduler
 from bot.telegram_log_handler import TelegramLogHandler
+from bot.notifier import Notifier
 
 # 1. --- Basic Logging Configuration ---
 logging.basicConfig(
@@ -46,47 +47,42 @@ class IsOwnerFilter(SimpleCustomFilter):
 
 
 async def main():
-    # Define tasks here to be accessible in the 'finally' block for cleanup
     monitor_task = None
     scheduler = None
     
     try:
-        
-        # Initialize database and API clients first as they are dependencies for others.
         db_manager = DatabaseManager()
         await db_manager.init_db()
         github_api = GitHubAPI(db_manager)
 
-        # Initialize the AI summarizer only if the API key is provided.
         summarizer = None
         if config.GEMINI_API_KEY:
             summarizer = AISummarizer(config.GEMINI_API_KEY)
         else:
             logger.warning("GEMINI_API_KEY not found. AI features disabled.")
 
-        # Initialize the main bot instance.
         bot = AsyncTeleBot(config.BOT_TOKEN, parse_mode=config.PARSE_MODE)
-        
-        # Register our custom owner-only filter.
         bot.add_custom_filter(IsOwnerFilter())
-
-        # Initialize the background task managers that handlers depend on.
-        scheduler = DigestScheduler(bot, github_api, db_manager, summarizer)
         
-        # Initialize command handlers and register them with the bot.
-        # We pass the scheduler instance to the handlers now.
-        handlers = BotHandlers(bot, github_api, db_manager, summarizer, scheduler)
+        # --- Create the Notifier instance first ---
+        notifier = Notifier(bot, github_api, db_manager, summarizer)
+
+        # --- Pass the notifier to the scheduler ---
+        # The scheduler no longer needs the bot or summarizer directly
+        scheduler_manager = DigestScheduler(db_manager, github_api, notifier)
+        
+        # --- Pass the notifier to the handlers ---
+        # We also remove the scheduler from the handlers' dependencies for now
+        handlers = BotHandlers(bot, github_api, db_manager, summarizer, scheduler_manager)
         handlers.register_handlers()
 
-        # Initialize the repository monitor.
-        monitor = RepositoryMonitor(bot, github_api, db_manager, scheduler)
+        # --- Pass the notifier to the monitor ---
+        monitor = RepositoryMonitor(bot, github_api, db_manager, notifier)
 
-        # Start the digest scheduler (for daily/weekly notifications).
-        scheduler.start()
+        # --- Start the digest scheduler (renamed variable to avoid confusion) ---
+        scheduler_manager.start()
 
-        # Start the repository monitoring loop as a concurrent task.
         monitor_task = asyncio.create_task(monitor.start_monitoring())
-
 
         logger.info("Personal GitHub Stars Bot started successfully!")
         await bot.infinity_polling(logger_level=logging.INFO)
@@ -94,14 +90,16 @@ async def main():
     except Exception as e:
         logger.error(f"A critical error occurred during bot startup or runtime: {e}", exc_info=True)
     finally:
-        # This block ensures that background tasks are properly shut down when the bot stops.
         logger.info("Bot is stopping...")
         if monitor_task and not monitor_task.done():
             monitor_task.cancel()
             logger.info("Monitoring task has been cancelled.")
-        if scheduler and scheduler.scheduler.running:
-            scheduler.scheduler.shutdown()
+        
+        # --- Updated scheduler shutdown check ---
+        if 'scheduler_manager' in locals() and scheduler_manager.scheduler.running:
+            scheduler_manager.scheduler.shutdown()
             logger.info("Digest scheduler has been shut down.")
+        
         if 'github_api' in locals() and github_api:
             await github_api.close()
             logger.info("GitHub API session has been closed.")

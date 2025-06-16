@@ -11,6 +11,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from collections import OrderedDict
 from urllib.parse import urlparse
 
+import logging
+logger = logging.getLogger(__name__)
+
 # Formats a duration in seconds into a human-readable string (e.g., "3600 seconds (1.0 hours)").
 def format_duration(seconds: int) -> str:
     if seconds < 120:
@@ -63,23 +66,37 @@ def format_time_ago(timestamp_str: str) -> str:
 def extract_media_from_readme(
     markdown_text: str, owner: str, repo: str, branch: str
 ) -> List[str]:
+    """
+    Extracts all valid media URLs (images, gifs, videos) from README markdown text.
+    Handles markdown tags, HTML tags, and standalone URLs.
+    """
     if not markdown_text:
         return []
 
-    media_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]|<video.*?src=[\'"](.*?)[\'"]'
-    found_urls = re.findall(media_pattern, markdown_text)
-    urls = [url for group in found_urls for url in group if url]
+    # Pattern for ![]() and <img/video> tags
+    tag_pattern = r'\!\[.*?\]\((.*?)\)|<img.*?src=[\'"](.*?)[\'"]|<video.*?src=[\'"](.*?)[\'"]'
+    
+    # Pattern for standalone http(s) URLs
+    url_pattern = r'https?://[^\s"\'<>)]+'
+
+    # Find all URLs from both patterns
+    found_tag_urls = re.findall(tag_pattern, markdown_text)
+    found_standalone_urls = re.findall(url_pattern, markdown_text)
+
+    # Combine and flatten the results, removing duplicates
+    urls = list(dict.fromkeys(
+        [url for group in found_tag_urls for url in group if url] + found_standalone_urls
+    ))
 
     absolute_urls = []
     for url in urls:
-        url = url.strip()
+        url = url.strip().rstrip(')') # Clean up trailing parentheses that regex might catch
         if url.startswith("http://") or url.startswith("https://"):
-            # Handle GitHub blob URLs (e.g. /blob/main/video.mp4)
             if "github.com" in url and "/blob/" in url:
                 url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
             absolute_urls.append(url)
         else:
-            # Relative URL
+            # Handle relative URLs
             clean_path = url.lstrip("./").lstrip("/")
             absolute_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{clean_path}"
             absolute_urls.append(absolute_url)
@@ -87,17 +104,23 @@ def extract_media_from_readme(
     valid_media_extensions = (
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm",
     )
-
-    excluded_keywords = ("badge", "sponsor", "donate", "logo", "contributor")
+    
+    # Expanded exclusion list for better filtering
+    excluded_keywords = (
+        "badge", "sponsor", "donate", "logo", "contributor", 
+        "shields.io", "badgen.net", "vercel.svg", "netlify.com/img/deploy"
+    )
 
     valid_urls = []
     for url in absolute_urls:
         try:
+            # Check for github asset urls without an extension
+            is_github_asset = "github.com" in url and "/assets/" in url
             parsed_path = urlparse(url).path.lower()
 
-            is_github_asset = "github.com" in url and "/assets/" in url
             if parsed_path.endswith(valid_media_extensions) or is_github_asset:
-                if not any(kw in parsed_path for kw in excluded_keywords):
+                # Check the full URL for exclusion keywords to catch domains
+                if not any(kw in url.lower() for kw in excluded_keywords):
                     valid_urls.append(url)
         except Exception:
             continue
@@ -150,8 +173,10 @@ async def get_media_info(url: str, session: aiohttp.ClientSession) -> Tuple[Opti
             if response.status == 200:
                 content_type = response.headers.get('Content-Type', '').lower()
                 return content_type, final_url
+            logger.warning(f"Failed to fetch media info for {url}. Status code: {response.status}")
             # If status is not 200, return None for type but provide the final URL
             return None, final_url
-    except Exception:
+    except Exception as e:
         # On any exception, return None for type and the original URL
+        logger.error(f"An exception occurred while fetching media info for {url}: {e}")
         return None, url
