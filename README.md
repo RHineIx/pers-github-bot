@@ -1,5 +1,10 @@
 # Personal AI-Powered GitHub Stars Bot
 
+![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Telegram Bot API](https://img.shields.io/badge/API-pyTelegramBotAPI-red.svg)
+
+
 A sophisticated, asynchronous Telegram bot designed to be your personal GitHub assistant.  
 It actively monitors your starred repositories and delivers intelligent, media-rich notifications to your chosen destinations, turning your star list into a powerful, curated feed of information.
 
