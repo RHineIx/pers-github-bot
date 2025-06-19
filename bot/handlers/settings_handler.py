@@ -150,7 +150,7 @@ class SettingsHandler:
         # --- Generates the interval sub-menu with presets ---
         current_interval = await self.db_manager.get_monitor_interval() or config.MONITOR_INTERVAL_SECONDS
         text = f"⏱️ **Select Check Interval**\n_Current: {format_duration(current_interval)}_"
-        presets = {"5m": 300, "15m": 900, "1h": 3600, "6h": 21600, "1d": 86400}
+        presets = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "6h": 21600, "1d": 86400}
         keyboard = InlineKeyboardMarkup(row_width=3)
         buttons = [InlineKeyboardButton(f"✅ {label}" if seconds == current_interval else label, callback_data=CallbackDataManager.create_callback_data('set_interval', {'seconds': seconds})) for label, seconds in presets.items()]
         keyboard.add(*buttons)
