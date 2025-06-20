@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 class BotHandlers:
     def __init__(
         self,
@@ -44,53 +43,53 @@ class BotHandlers:
         self.db_manager = db_manager
         self.summarizer = summarizer
         self.scheduler = scheduler
-        
-        # --- Create and initialize the specialized handler for settings ---
         self.settings_handler = SettingsHandler(bot, db_manager, scheduler)
 
     def register_handlers(self):
-        # --- Register all command and query handlers ---
-
-        # --- Let the specialized handler register its own commands ---
+        # Register all command and query handlers
         self.settings_handler.register_handlers()
         
-        # --- Register main commands handled by this class ---
+        # Register main commands handled by this class
         self.bot.message_handler(is_owner=True, commands=["start", "help"])(self.handle_help)
         self.bot.message_handler(is_owner=True, commands=["status"])(self.handle_status)
         self.bot.message_handler(is_owner=True, commands=["testlog"])(self.handle_test_log)
+        
+        # Register Token Management commands
         self.bot.message_handler(is_owner=True, commands=["settoken"])(self.handle_set_token)
-        # --- We will move other commands like destination/token management later ---
+        self.bot.message_handler(is_owner=True, commands=["removetoken"])(self.handle_remove_token)
+        
+        # Register Destination Management commands
+        self.bot.message_handler(is_owner=True, commands=["add_dest"])(self.handle_add_destination)
+        self.bot.message_handler(is_owner=True, commands=["remove_dest"])(self.handle_remove_destination)
+        self.bot.message_handler(is_owner=True, commands=["list_dests"])(self.handle_list_destinations)
 
+        # Register Inline Query Handler
         self.bot.inline_handler(is_owner=True, func=lambda query: True)(self.handle_inline_query)
 
-        # --- This text handler will be modified later for destination/token input ---
-        # self.bot.message_handler(is_owner=True, content_types=['text'])(self.handle_text_message)
-
     async def handle_help(self, message: Message):
-        # --- Handles the /start and /help command ---
+        """Handles the /start and /help command with a complete command list."""
         help_text = f"👋 **Hi, {message.from_user.first_name}!**\n\n"
         help_text += """
 📖 *Available Commands*
 
-*Core Controls:*
+*Token Management:*
 `/settoken <TOKEN>` - Saves your GitHub Token.
-`/removetoken` - Deletes your token.
-`/status` - Shows bot status.
-`/settings` - Opens the interactive settings menu.
+`/removetoken` - Deletes your currently stored token.
+
+*Core & Status:*
+`/status` - Shows a detailed summary of the bot's current status.
+`/settings` - Opens the interactive menu to configure the bot.
 `/testlog` - Sends a test message to the log channel.
 
-*Legacy Commands (to be moved):*
-`/pause` | `/resume` - Pause/Resume monitoring.
-`/setinterval <seconds>` - Sets check interval.
-`/digest <daily|weekly|off>` - Set notification mode.
-`/add_dest [ID]` | `/remove_dest <ID|me>` | `/list_dests`
+*Destination Management:*
+`/add_dest <ID>` - Adds a channel/group/topic ID for notifications.
+`/remove_dest <ID|me>` - Removes a notification destination.
+`/list_dests` - Lists all configured destinations.
 """
         try:
-            await self.bot.reply_to(
-                message, help_text, parse_mode="Markdown", message_effect_id="5046509860389126442"
-            )
+            await self.bot.reply_to(message, help_text, parse_mode="Markdown")
         except Exception as e:
-            logger.warning(f"Could not send message with effect, sending normally. Error: {e}")
+            logger.warning(f"Could not send help message: {e}")
             await self.bot.reply_to(message, help_text, parse_mode="Markdown")
 
     async def handle_test_log(self, message: Message):
@@ -184,6 +183,80 @@ class BotHandlers:
         finally:
             try: await self.bot.delete_message(message.chat.id, message.message_id)
             except Exception as e: logger.warning(f"Could not delete token message: {e}")
+
+    # --- NEW TOKEN MANAGEMENT METHOD ---
+    async def handle_remove_token(self, message: Message):
+        """Removes the GitHub token and pauses monitoring."""
+        await self.db_manager.remove_token()
+        await self.db_manager.set_monitoring_paused(True) # Pause monitoring for safety
+        reply_text = (
+            "🗑️ **Token Removed.**\n\n"
+            "All monitoring has been paused. Use `/settoken` to add a new one."
+        )
+        await self.bot.reply_to(message, reply_text, parse_mode="Markdown")
+        
+    # --- NEW DESTINATION MANAGEMENT METHODS ---
+    async def handle_add_destination(self, message: Message):
+        """Adds a new notification destination after verifying it."""
+        try:
+            target_id = message.text.split(" ", 1)[1]
+            if not (target_id.startswith('-') or target_id.replace('/', '').isnumeric()):
+                 raise ValueError("Invalid ID format.")
+        except (IndexError, ValueError):
+            await self.bot.reply_to(
+                message, 
+                "Usage: `/add_dest <ID>`\n"
+                "Example for a channel: `/add_dest -100123456789`\n"
+                "Example for a topic: `/add_dest -100123456789/4`",
+                parse_mode="Markdown"
+            )
+            return
+
+        wait_msg = await self.bot.reply_to(message, f"Verifying destination `{target_id}`...")
+        try:
+            chat_id_str, thread_id = (target_id.split('/')[0], int(target_id.split('/')[1])) if '/' in target_id else (target_id, None)
+            test_msg = await self.bot.send_message(chat_id_str, "✅ Verification successful.", message_thread_id=thread_id)
+            await self.bot.delete_message(chat_id_str, test_msg.message_id)
+            
+            await self.db_manager.add_destination(target_id)
+            await self.bot.edit_message_text(f"✅ Destination `{target_id}` added successfully!", wait_msg.chat.id, wait_msg.message_id, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.error(f"Failed to verify destination {target_id}: {e}")
+            error_text = (
+                f"❌ **Failed to add destination.**\n\n"
+                f"Please ensure the bot is a member of the chat/channel and has permission to send messages."
+            )
+            await self.bot.edit_message_text(error_text, wait_msg.chat.id, wait_msg.message_id, parse_mode="Markdown")
+
+    async def handle_remove_destination(self, message: Message):
+        """Removes a notification destination."""
+        try:
+            target_id_str = message.text.split(" ", 1)[1]
+            if target_id_str.lower() == 'me':
+                target_id = str(message.from_user.id)
+            else:
+                target_id = target_id_str
+        except IndexError:
+            await self.bot.reply_to(message, "Usage: `/remove_dest <ID|me>`", parse_mode="Markdown")
+            return
+            
+        rows_affected = await self.db_manager.remove_destination(target_id)
+        if rows_affected > 0:
+            await self.bot.reply_to(message, f"✅ Destination `{target_id}` removed.", parse_mode="Markdown")
+        else:
+            await self.bot.reply_to(message, f"❌ Destination `{target_id}` not found.", parse_mode="Markdown")
+
+    async def handle_list_destinations(self, message: Message):
+        """Lists all configured notification destinations."""
+        destinations = await self.db_manager.get_all_destinations()
+        if not destinations:
+            await self.bot.reply_to(message, "There are no notification destinations configured.")
+            return
+
+        text = "📍 *Configured Notification Destinations:*\n\n"
+        text += "\n".join([f"`{dest}`" for dest in destinations])
+        await self.bot.reply_to(message, text, parse_mode="Markdown")
     
     async def handle_inline_query(self, query: InlineQueryResultArticle):
         # --- This function remains here for now ---
