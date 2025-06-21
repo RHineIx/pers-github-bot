@@ -34,7 +34,6 @@ if config.LOG_CHANNEL_ID:
     logging.getLogger("").addHandler(telegram_handler)
     logger.info(f"TelegramLogHandler configured for channel {config.LOG_CHANNEL_ID}.")
 
-
 # --- Custom Filter for Owner-Only Access ---
 class IsOwnerFilter(SimpleCustomFilter):
     key = "is_owner"
@@ -83,7 +82,7 @@ async def main():
         # --- Start the digest scheduler ---
         scheduler_manager.start()
 
-        # --- MODIFIED: Start monitoring loops as separate tasks ---
+        # --- Start monitoring loops as separate tasks ---
         monitor.start_monitoring()  # This just sets the flag to True
 
         stars_monitor_task = asyncio.create_task(
@@ -93,7 +92,6 @@ async def main():
             monitor.releases_monitoring_loop(interval=config.RELEASES_MONITOR_INTERVAL)
         )
         logger.info(f"Stars (interval: {config.STARS_MONITOR_INTERVAL}s) and Releases (interval: {config.RELEASES_MONITOR_INTERVAL}s) monitoring tasks started.")
-        # --- End of modification ---
 
         logger.info("Personal GitHub Stars Bot started successfully!")
         await bot.infinity_polling(logger_level=logging.INFO)
@@ -103,7 +101,6 @@ async def main():
     finally:
         logger.info("Bot is stopping...")
         
-        # --- MODIFIED: Cancel the two new tasks ---
         if stars_monitor_task and not stars_monitor_task.done():
             stars_monitor_task.cancel()
             logger.info("Stars monitoring task has been cancelled.")
@@ -111,7 +108,6 @@ async def main():
         if releases_monitor_task and not releases_monitor_task.done():
             releases_monitor_task.cancel()
             logger.info("Releases monitoring task has been cancelled.")
-        # --- End of modification ---
         
         if scheduler_manager and scheduler_manager.scheduler.running:
             scheduler_manager.scheduler.shutdown()

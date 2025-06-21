@@ -83,9 +83,7 @@ class BotHandlers:
         # Add these lines inside the register_handlers method in BotHandlers class
         self.bot.message_handler(commands=["track_rel"])(self.handle_track_release)
         self.bot.message_handler(commands=["untrack_rel"])(self.handle_untrack_release)
-        self.bot.message_handler(commands=["list_tracked_rels"])(
-            self.handle_list_tracked_releases
-        )
+        self.bot.message_handler(commands=["list_tracked_rels"])(self.handle_list_tracked_releases)
 
         # Register Inline Query Handler
         self.bot.inline_handler(is_owner=True, func=lambda query: True)(
@@ -415,7 +413,7 @@ class BotHandlers:
         """Handles the /track_rel command."""
         # The command in your file is /track_rel, so we adjust the parser text
         parsed_args = TrackCommandParser.parse_track_command(
-            message.text.replace('/track_rel', '/track_release')
+            message.text.replace("/track_rel", "/track_release")
         )
 
         if not parsed_args:
@@ -433,11 +431,9 @@ class BotHandlers:
             message, f"🔍 Verifying repository `{repo_full_name}`..."
         )
         try:
-            # --- START OF CORRECTION ---
-            owner, repo_name = repo_full_name.split('/')
+            owner, repo_name = repo_full_name.split("/")
             repo_exists = await self.github_api.get_repository(owner, repo_name)
-            # --- END OF CORRECTION ---
-            
+
             if not repo_exists:
                 await self.bot.edit_message_text(
                     f"❌ Repository `{repo_full_name}` not found.",

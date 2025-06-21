@@ -3,11 +3,10 @@
 # database operations using a persistent SQLite database.
 
 import aiosqlite
-import json
 import logging
 import os
 from cryptography.fernet import Fernet
-from typing import Optional, List, Set
+from typing import Optional, List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -80,31 +79,43 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
-            
+
+    # --- Generic Key-Value State Helper Methods (Refactored) ---
+
+    async def _set_state_value(self, key: str, value: Any):
+        """Generic method to set a key-value pair in the bot_state table."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", (key, str(value)))
+            await conn.commit()
+
+    async def _get_state_value(self, key: str) -> Optional[str]:
+        """Generic method to get a value by key from the bot_state table."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", (key,))
+            result = await cursor.fetchone()
+            return result[0] if result else None
+
+    async def _clear_state_value(self, key: str):
+        """Generic method to delete a key from the bot_state table."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM bot_state WHERE key = ?", (key,))
+            await conn.commit()
+
     # --- Digest/Queue Management ---
 
     async def update_digest_mode(self, mode: str):
-        # Stores the user's preferred notification mode ('off', 'daily', 'weekly').
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("digest_mode", mode))
-            await conn.commit()
+        await self._set_state_value("digest_mode", mode)
         logger.info(f"Digest mode set to: {mode}")
 
     async def get_digest_mode(self) -> str:
-        # Retrieves the current digest mode, defaulting to 'off'.
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("digest_mode",))
-            result = await cursor.fetchone()
-            return result[0] if result else "off"
+        return await self._get_state_value("digest_mode") or "off"
 
     async def add_repo_to_digest(self, repo_full_name: str):
-        # Adds a newly starred repo to the queue for the next digest.
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("INSERT OR IGNORE INTO digest_queue (repo_full_name) VALUES (?)", (repo_full_name,))
             await conn.commit()
 
     async def get_and_clear_digest_queue(self) -> List[str]:
-        # Atomically retrieves and clears the digest queue for processing.
         async with aiosqlite.connect(self.db_path) as conn:
             cursor = await conn.execute("SELECT repo_full_name FROM digest_queue ORDER BY added_at ASC")
             repo_list = [row[0] for row in await cursor.fetchall()]
@@ -112,9 +123,8 @@ class DatabaseManager:
                 await conn.execute("DELETE FROM digest_queue")
                 await conn.commit()
             return repo_list
-    
+
     async def get_digest_queue_count(self) -> int:
-        """Counts the number of items currently in the digest queue."""
         async with aiosqlite.connect(self.db_path) as conn:
             cursor = await conn.execute("SELECT COUNT(*) FROM digest_queue")
             result = await cursor.fetchone()
@@ -123,30 +133,20 @@ class DatabaseManager:
     # --- Core State & Token Management ---
 
     async def store_token(self, token: str) -> None:
-        # Encrypts and saves the GitHub token.
         encrypted_token = self.cipher.encrypt(token.encode()).decode()
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("github_token", encrypted_token))
-            await conn.commit()
+        await self._set_state_value("github_token", encrypted_token)
 
     async def get_token(self) -> Optional[str]:
-        # Retrieves and decrypts the GitHub token.
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("github_token",))
-            result = await cursor.fetchone()
-            if result:
-                return self.cipher.decrypt(result[0].encode()).decode()
+        encrypted_token = await self._get_state_value("github_token")
+        if encrypted_token:
+            return self.cipher.decrypt(encrypted_token.encode()).decode()
         return None
 
     async def remove_token(self) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("DELETE FROM bot_state WHERE key = ?", ("github_token",))
-            await conn.commit()
+        await self._clear_state_value("github_token")
 
     async def token_exists(self) -> bool:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT 1 FROM bot_state WHERE key = ?", ("github_token",))
-            return await cursor.fetchone() is not None
+        return await self._get_state_value("github_token") is not None
 
     # --- Destination Management ---
 
@@ -167,118 +167,66 @@ class DatabaseManager:
             rows = await cursor.fetchall()
             return [row[0] for row in rows] if rows else []
 
-    # --- Generic Key-Value State Methods ---
+    # --- Refactored State Methods ---
 
     async def update_last_check_timestamp(self, timestamp: str) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("last_check_timestamp", timestamp))
-            await conn.commit()
+        await self._set_state_value("last_check_timestamp", timestamp)
 
     async def get_last_check_timestamp(self) -> Optional[str]:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("last_check_timestamp",))
-            result = await cursor.fetchone()
-            return result[0] if result else None
+        return await self._get_state_value("last_check_timestamp")
 
     async def update_monitor_interval(self, seconds: int) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("monitor_interval", str(seconds)))
-            await conn.commit()
+        await self._set_state_value("monitor_interval", seconds)
 
     async def get_monitor_interval(self) -> Optional[int]:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("monitor_interval",))
-            result = await cursor.fetchone()
-            return int(result[0]) if result else None
+        interval = await self._get_state_value("monitor_interval")
+        return int(interval) if interval else None
 
     async def set_monitoring_paused(self, paused: bool) -> None:
-        value_to_store = "1" if paused else "0"
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("monitoring_paused", value_to_store))
-            await conn.commit()
+        await self._set_state_value("monitoring_paused", "1" if paused else "0")
 
     async def is_monitoring_paused(self) -> bool:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("monitoring_paused",))
-            result = await cursor.fetchone()
-            return result[0] == "1" if result else False
+        paused_val = await self._get_state_value("monitoring_paused")
+        return paused_val == "1"
 
     async def update_last_error(self, message: str) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("last_error_message", message))
-            await conn.commit()
+        await self._set_state_value("last_error_message", message)
 
     async def get_last_error(self) -> Optional[str]:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("last_error_message",))
-            result = await cursor.fetchone()
-            return result[0] if result else None
+        return await self._get_state_value("last_error_message")
 
     async def clear_last_error(self) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("DELETE FROM bot_state WHERE key = ?", ("last_error_message",))
-            await conn.commit()
+        await self._clear_state_value("last_error_message")
 
-    async def set_bot_state(self, state: str):  
-        async with aiosqlite.connect(self.db_path) as conn:  
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("bot_state", state))  
-            await conn.commit()  
-    
-    async def get_bot_state(self):  
-        async with aiosqlite.connect(self.db_path) as conn:  
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("bot_state",))  
-            result = await cursor.fetchone()  
-            return {"state": result[0]} if result else None  
-    
-    async def clear_bot_state(self):  
-        async with aiosqlite.connect(self.db_path) as conn:  
-            await conn.execute("DELETE FROM bot_state WHERE key = ?", ("bot_state",))  
-            await conn.commit()
+    async def set_bot_state(self, state: str):
+        await self._set_state_value("bot_state", state)
+
+    async def get_bot_state(self):
+        state = await self._get_state_value("bot_state")
+        return {"state": state} if state else None
+
+    async def clear_bot_state(self):
+        await self._clear_state_value("bot_state")
 
     async def set_ai_features_enabled(self, enabled: bool):
-        """Stores the state of the main AI features toggle."""
-        value_to_store = "1" if enabled else "0"
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("ai_features_enabled", value_to_store))
-            await conn.commit()
+        await self._set_state_value("ai_features_enabled", "1" if enabled else "0")
 
     async def are_ai_features_enabled(self) -> bool:
-        """Checks if main AI features are enabled. Defaults to True if not set."""
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("ai_features_enabled",))
-            result = await cursor.fetchone()
-            if result is None:
-                return True # Enabled by default
-            return result[0] == "1"
+        value = await self._get_state_value("ai_features_enabled")
+        return value != "0"  # Default to True if not set or is "1"
 
     async def set_ai_media_selection_enabled(self, enabled: bool):
-        """Stores the state of the AI media selection toggle."""
-        value_to_store = "1" if enabled else "0"
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", ("ai_media_selection_enabled", value_to_store))
-            await conn.commit()
+        await self._set_state_value("ai_media_selection_enabled", "1" if enabled else "0")
 
     async def is_ai_media_selection_enabled(self) -> bool:
-        """Checks if AI media selection is enabled. Defaults to True if not set."""
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute("SELECT value FROM bot_state WHERE key = ?", ("ai_media_selection_enabled",))
-            result = await cursor.fetchone()
-            if result is None:
-                return True # Enabled by default
-            return result[0] == "1"
-        
-    # === REPLACE THE 5 NEW METHODS WITH THIS CORRECTED CODE ===
+        value = await self._get_state_value("ai_media_selection_enabled")
+        return value != "0"  # Default to True if not set or is "1"
+
+    # --- Release Tracking Management ---
 
     async def add_release_subscription(self, repo_full_name: str, chat_id: str, thread_id: str | None) -> bool:
-        """Adds a repository to the release tracking list with a specific destination."""
         async with aiosqlite.connect(self.db_path) as conn:
-            # First, ensure the repository exists in the main tracking table
-            await conn.execute(
-                "INSERT OR IGNORE INTO tracked_releases (repo_full_name) VALUES (?)",
-                (repo_full_name,)
-            )
-
-            # Then, add the specific subscription
+            await conn.execute("INSERT OR IGNORE INTO tracked_releases (repo_full_name) VALUES (?)", (repo_full_name,))
             try:
                 await conn.execute(
                     """
@@ -295,9 +243,7 @@ class DatabaseManager:
                 return False
 
     async def remove_release_subscription(self, repo_full_name: str, chat_id: str, thread_id: str | None) -> bool:
-        """Removes a specific subscription for a repository."""
         async with aiosqlite.connect(self.db_path) as conn:
-            # Build query dynamically to handle NULL thread_id correctly
             query = "DELETE FROM release_subscriptions WHERE repo_full_name = ? AND destination_chat_id = ?"
             params = [repo_full_name, str(chat_id)]
 
@@ -312,10 +258,7 @@ class DatabaseManager:
 
             if cursor.rowcount > 0:
                 logger.info(f"Removed release subscription for {repo_full_name} from chat {chat_id}.")
-                # Optional: Cleanup if no subscriptions are left for this repo
-                cursor = await conn.execute(
-                    "SELECT 1 FROM release_subscriptions WHERE repo_full_name = ?", (repo_full_name,)
-                )
+                cursor = await conn.execute("SELECT 1 FROM release_subscriptions WHERE repo_full_name = ?", (repo_full_name,))
                 if await cursor.fetchone() is None:
                     await conn.execute("DELETE FROM tracked_releases WHERE repo_full_name = ?", (repo_full_name,))
                     await conn.commit()
@@ -324,7 +267,6 @@ class DatabaseManager:
             return False
 
     async def list_tracked_releases(self) -> list:
-        """Lists all release subscriptions."""
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT * FROM release_subscriptions ORDER BY repo_full_name")
@@ -332,7 +274,6 @@ class DatabaseManager:
             return [dict(row) for row in rows]
 
     async def get_all_tracked_releases_with_subscriptions(self) -> list:
-        """Gets all tracked repos and groups their subscriptions for the monitor."""
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT repo_full_name, last_release_tag FROM tracked_releases")
@@ -351,7 +292,6 @@ class DatabaseManager:
             return results
 
     async def update_last_release_tag(self, repo_full_name: str, tag: str):
-        """Updates the last seen release tag for a tracked repository."""
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute(
                 "UPDATE tracked_releases SET last_release_tag = ? WHERE repo_full_name = ?",
