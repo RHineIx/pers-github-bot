@@ -6,6 +6,7 @@ from datetime import datetime
 
 from telebot import types
 from telebot.util import quick_markup
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.utils import format_time_ago
 
@@ -103,6 +104,49 @@ class RepoFormatter:
 <a href='{html_url}'>🔗 View on GitHub</a>{topics_text}
 """
         return message.strip()
+    
+
+# In github/formatter.py, add this new method to the RepoFormatter class
+
+    @staticmethod
+    def format_simple_release_notification(repo_data: dict, release_data: dict) -> dict:
+        """Formats a simple, text-based release notification."""
+        repo_full_name = repo_data.get("full_name", "N/A")
+        # Take only the first line of the description
+        repo_description = (repo_data.get("description", "No description.") or "").split('\n')[0]
+        
+        tag_name = release_data.get("tag_name", "N/A")
+        release_url = release_data.get("html_url", "")
+        release_name = release_data.get("name", tag_name)
+        published_at_str = release_data.get("published_at", "")
+        body = release_data.get("body", "No release notes provided.")
+
+        # Truncate body if it's too long to avoid hitting Telegram message limits
+        if len(body) > 2000:
+            body = body[:2000] + "..."
+        # If body is empty, use a placeholder
+        if not body.strip():
+            body = "No details were provided for this release."
+
+        date_str = "N/A"
+        if published_at_str:
+            # Use the format_time_ago function you already have in utils
+            date_str = f"{published_at_str.split('T')[0]} ({format_time_ago(published_at_str)})"
+
+        text = (
+            f"📦 <b>{repo_full_name}</b>\n"
+            f"<i>{repo_description}</i>\n"
+            "------------------------------------\n"
+            f"🚀 <b>New Release: {release_name}</b>\n\n"
+            f"<b>Version:</b> <code>{tag_name}</code>\n"
+            f"<b>Published:</b> {date_str}\n\n"
+            f"<b>Changes:</b>\n<blockquote expandable>{body}</blockquote>"
+        )
+        
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton(text="View Full Release on GitHub", url=release_url))
+        
+        return {"text": text, "keyboard": keyboard}
 
 
 # Formats data related to GitHub users.

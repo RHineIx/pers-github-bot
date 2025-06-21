@@ -148,3 +148,34 @@ class Notifier:
 
         except Exception as e:
             logger.error(f"Failed to process and send notification for {owner}/{repo_name}: {e}", exc_info=True)
+
+
+# In bot/notifier.py, add this new method to the Notifier class
+
+    async def send_release_notification(self, release_data: dict, repo_info: dict, subscriptions: list):
+        """Formats and sends notifications for a new release to specified destinations."""
+        logger.info(f"Sending release notification for {repo_info['full_name']} to {len(subscriptions)} destinations.")
+        
+        # This import is local to the function to avoid circular dependencies if needed
+        from github.formatter import RepoFormatter
+        
+        formatted = RepoFormatter.format_simple_release_notification(repo_info, release_data)
+        text = formatted['text']
+        keyboard = formatted['keyboard']
+        
+        for sub in subscriptions:
+            chat_id = sub['destination_chat_id']
+            thread_id = sub.get('destination_thread_id') # Use .get() for safety
+            
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True # Keep the message clean
+                )
+                logger.info(f"Successfully sent release notification to {chat_id}/{thread_id or ''}")
+            except Exception as e:
+                logger.error(f"Failed to send release notification to {chat_id}/{thread_id or ''}: {e}")
+            await asyncio.sleep(1) # Sleep briefly between sends to avoid hitting Telegram's rate limits

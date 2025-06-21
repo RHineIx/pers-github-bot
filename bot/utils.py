@@ -180,3 +180,56 @@ async def get_media_info(url: str, session: aiohttp.ClientSession) -> Tuple[Opti
         # On any exception, return None for type and the original URL
         logger.error(f"An exception occurred while fetching media info for {url}: {e}")
         return None, url
+    
+class TrackCommandParser:
+    """Parser for the /track_release command syntax."""
+
+    @staticmethod
+    def parse_track_command(command_text: str) -> dict | None:
+        """
+        Parses the /track_release command.
+        Example: /track_release owner/repo > -1001234567890/123
+        Returns: A dictionary with 'repo_full_name', 'chat_id', 'thread_id' or None.
+        """
+        # Remove the command part, e.g., /track_release
+        parts = command_text.split(maxsplit=1)
+        if len(parts) < 2:
+            return None
+        args_str = parts[1]
+
+        # Regex to capture: repo, and optionally the destination part
+        pattern = r'^([^>\s]+)\s*(?:>\s*(-?\d+(?:/\d+)?))?$'
+        match = re.match(pattern, args_str.strip())
+
+        if not match:
+            return None
+
+        repo_full_name = match.group(1).strip()
+        destination_str = match.group(2)
+
+        # Validate repo format
+        if len(repo_full_name.split('/')) != 2:
+            return None
+
+        chat_id = None
+        thread_id = None
+
+        if destination_str:
+            if '/' in destination_str:
+                dest_parts = destination_str.split('/')
+                try:
+                    chat_id = dest_parts[0]
+                    thread_id = dest_parts[1]
+                except (ValueError, IndexError):
+                    return None
+            else:
+                try:
+                    chat_id = destination_str
+                except ValueError:
+                    return None
+
+        return {
+            'repo_full_name': repo_full_name,
+            'chat_id': chat_id,
+            'thread_id': thread_id
+        }

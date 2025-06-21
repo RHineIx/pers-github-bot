@@ -27,7 +27,8 @@ class Config:
     CACHE_TTL_SECONDS: int = 1800  # Cache API responses for 30 minutes
 
     # --- Monitoring Settings ---
-    # Default interval, can be overridden by user command.
-    MONITOR_INTERVAL_SECONDS: int = 300  # 5 minutes
+    # Monitoring intervals (in seconds)
+    STARS_MONITOR_INTERVAL: int = int(os.getenv("STARS_MONITOR_INTERVAL", 300))  # 5 minutes default
+    RELEASES_MONITOR_INTERVAL: int = int(os.getenv("RELEASES_MONITOR_INTERVAL", 30)) # 10 minutes default
 
 config = Config()

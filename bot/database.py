@@ -55,6 +55,25 @@ class DatabaseManager:
                         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                # Add new tables for release tracking
+                logger.info("Creating tables for release tracking...")
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tracked_releases (
+                        repo_full_name TEXT PRIMARY KEY,
+                        last_release_tag TEXT
+                    )
+                """)
+
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS release_subscriptions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        repo_full_name TEXT NOT NULL,
+                        destination_chat_id TEXT NOT NULL,
+                        destination_thread_id TEXT,
+                        UNIQUE(repo_full_name, destination_chat_id, destination_thread_id),
+                        FOREIGN KEY (repo_full_name) REFERENCES tracked_releases (repo_full_name) ON DELETE CASCADE
+                    )
+                """)
                 await conn.commit()
             self._db_initialized = True
             logger.info("Database initialized successfully.")
@@ -247,3 +266,95 @@ class DatabaseManager:
             if result is None:
                 return True # Enabled by default
             return result[0] == "1"
+        
+    # === REPLACE THE 5 NEW METHODS WITH THIS CORRECTED CODE ===
+
+    async def add_release_subscription(self, repo_full_name: str, chat_id: str, thread_id: str | None) -> bool:
+        """Adds a repository to the release tracking list with a specific destination."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            # First, ensure the repository exists in the main tracking table
+            await conn.execute(
+                "INSERT OR IGNORE INTO tracked_releases (repo_full_name) VALUES (?)",
+                (repo_full_name,)
+            )
+
+            # Then, add the specific subscription
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO release_subscriptions (repo_full_name, destination_chat_id, destination_thread_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (repo_full_name, str(chat_id), str(thread_id) if thread_id else None)
+                )
+                await conn.commit()
+                logger.info(f"Added release subscription for {repo_full_name} to chat {chat_id}.")
+                return True
+            except aiosqlite.IntegrityError:
+                logger.warning(f"Subscription for {repo_full_name} to {chat_id} already exists.")
+                return False
+
+    async def remove_release_subscription(self, repo_full_name: str, chat_id: str, thread_id: str | None) -> bool:
+        """Removes a specific subscription for a repository."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            # Build query dynamically to handle NULL thread_id correctly
+            query = "DELETE FROM release_subscriptions WHERE repo_full_name = ? AND destination_chat_id = ?"
+            params = [repo_full_name, str(chat_id)]
+
+            if thread_id is None:
+                query += " AND destination_thread_id IS NULL"
+            else:
+                query += " AND destination_thread_id = ?"
+                params.append(str(thread_id))
+
+            cursor = await conn.execute(query, tuple(params))
+            await conn.commit()
+
+            if cursor.rowcount > 0:
+                logger.info(f"Removed release subscription for {repo_full_name} from chat {chat_id}.")
+                # Optional: Cleanup if no subscriptions are left for this repo
+                cursor = await conn.execute(
+                    "SELECT 1 FROM release_subscriptions WHERE repo_full_name = ?", (repo_full_name,)
+                )
+                if await cursor.fetchone() is None:
+                    await conn.execute("DELETE FROM tracked_releases WHERE repo_full_name = ?", (repo_full_name,))
+                    await conn.commit()
+                    logger.info(f"Removed {repo_full_name} from tracked_releases as it has no subscriptions left.")
+                return True
+            return False
+
+    async def list_tracked_releases(self) -> list:
+        """Lists all release subscriptions."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute("SELECT * FROM release_subscriptions ORDER BY repo_full_name")
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_all_tracked_releases_with_subscriptions(self) -> list:
+        """Gets all tracked repos and groups their subscriptions for the monitor."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute("SELECT repo_full_name, last_release_tag FROM tracked_releases")
+            repos = await cursor.fetchall()
+
+            results = []
+            for repo in repos:
+                repo_dict = dict(repo)
+                sub_cursor = await conn.execute(
+                    "SELECT destination_chat_id, destination_thread_id FROM release_subscriptions WHERE repo_full_name = ?",
+                    (repo_dict['repo_full_name'],)
+                )
+                subscriptions = await sub_cursor.fetchall()
+                repo_dict['subscriptions'] = [dict(sub) for sub in subscriptions]
+                results.append(repo_dict)
+            return results
+
+    async def update_last_release_tag(self, repo_full_name: str, tag: str):
+        """Updates the last seen release tag for a tracked repository."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "UPDATE tracked_releases SET last_release_tag = ? WHERE repo_full_name = ?",
+                (tag, repo_full_name)
+            )
+            await conn.commit()

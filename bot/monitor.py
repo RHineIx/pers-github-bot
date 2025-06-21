@@ -34,32 +34,38 @@ class RepositoryMonitor:
         self.notifier = notifier
         self.is_monitoring = False
 
-    async def start_monitoring(self):
-        # Starts the background monitoring loop.
-        self.is_monitoring = True
-        logger.info("Repository monitoring service started.")
-        while self.is_monitoring:
+    def start_monitoring(self):
+        """Sets the monitoring flag to True. The loops are started from main."""
+        self.monitoring = True
+        logger.info("Repository monitoring enabled.")
+
+    async def stars_monitoring_loop(self, interval: int):
+        """The dedicated monitoring loop for checking new stars."""
+        logger.info(f"Stars monitoring loop started. Interval: {interval} seconds.")
+        while self.monitoring:
             try:
-                # First, check if monitoring is paused by the user.
-                if await self.db_manager.is_monitoring_paused():
-                    logger.info("Monitoring is paused. Skipping check cycle.")
-                # Then, check if a token exists to perform the check.
-                elif await self.db_manager.token_exists():
-                    await self._check_for_new_stars()
-                else:
-                    logger.debug("No GitHub token found. Skipping monitoring cycle.")
-
-                # Dynamically fetch the sleep interval.
-                interval_seconds = await self.db_manager.get_monitor_interval() or config.MONITOR_INTERVAL_SECONDS
-                if interval_seconds < 60:
-                    interval_seconds = 60 # Enforce a minimum of 60 seconds.
-                
-                logger.debug(f"Monitoring loop sleeping for {interval_seconds} seconds.")
-                await asyncio.sleep(interval_seconds)
-
+                await self._check_for_new_stars()
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                logger.info("Stars monitoring loop was cancelled.")
+                break
             except Exception as e:
-                logger.error(f"An unexpected error in monitoring loop: {e}", exc_info=True)
-                await asyncio.sleep(60) # Wait a minute before retrying on major errors.
+                logger.error(f"Error in stars monitoring loop: {e}")
+                await asyncio.sleep(60) # Wait 1 minute before retrying on error
+
+    async def releases_monitoring_loop(self, interval: int):
+        """The dedicated monitoring loop for checking new releases."""
+        logger.info(f"Releases monitoring loop started. Interval: {interval} seconds.")
+        while self.monitoring:
+            try:
+                await self._check_for_new_releases()
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                logger.info("Releases monitoring loop was cancelled.")
+                break
+            except Exception as e:
+                logger.error(f"Error in releases monitoring loop: {e}")
+                await asyncio.sleep(60) # Wait 1 minute before retrying on error
 
     async def _check_for_new_stars(self):
         # The core logic for detecting new stars.
@@ -137,3 +143,49 @@ class RepositoryMonitor:
                 logger.error(f"A GitHub API error occurred during check: {e}")
         except Exception as e:
             logger.error(f"A critical error occurred during star checking process: {e}", exc_info=True)
+
+    async def _check_for_new_releases(self):
+        """Checks all tracked repositories for new releases."""
+        logger.info("Checking for new releases...")
+        try:
+            tracked_repos = await self.db_manager.get_all_tracked_releases_with_subscriptions()
+
+            for repo in tracked_repos:
+                repo_full_name = repo['repo_full_name']
+                last_seen_tag = repo['last_release_tag']
+                subscriptions = repo['subscriptions']
+
+                if not subscriptions:
+                    continue
+
+                try:
+                    # --- START OF CORRECTION ---
+                    owner, repo_name = repo_full_name.split('/')
+                    latest_release = await self.github_api.get_latest_release(owner, repo_name)
+                    # --- END OF CORRECTION ---
+
+                    if not latest_release:
+                        continue
+                    
+                    current_release_tag = latest_release.get("tag_name")
+
+                    if current_release_tag and current_release_tag != last_seen_tag:
+                        logger.info(f"New release found for {repo_full_name}: {current_release_tag}")
+                        
+                        # --- START OF CORRECTION ---
+                        repo_info = await self.github_api.get_repository(owner, repo_name)
+                        # --- END OF CORRECTION ---
+
+                        if not repo_info:
+                            logger.warning(f"Could not fetch repo info for {repo_full_name}, skipping notification.")
+                            continue
+                            
+                        # This will call the notifier method. Make sure it exists in your notifier.py
+                        await self.notifier.send_release_notification(latest_release, repo_info, subscriptions)
+                        
+                        await self.db_manager.update_last_release_tag(repo_full_name, current_release_tag)
+
+                except Exception as e:
+                    logger.error(f"Failed to check releases for {repo_full_name}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to fetch tracked releases from DB: {e}")

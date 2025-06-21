@@ -47,8 +47,11 @@ class IsOwnerFilter(SimpleCustomFilter):
 
 
 async def main():
-    monitor_task = None
-    scheduler = None
+    # --- MODIFIED: Initialize new task variables ---
+    stars_monitor_task = None
+    releases_monitor_task = None
+    scheduler_manager = None
+    github_api = None
     
     try:
         db_manager = DatabaseManager()
@@ -68,21 +71,29 @@ async def main():
         notifier = Notifier(bot, github_api, db_manager, summarizer)
 
         # --- Pass the notifier to the scheduler ---
-        # The scheduler no longer needs the bot or summarizer directly
         scheduler_manager = DigestScheduler(db_manager, github_api, notifier)
         
         # --- Pass the notifier to the handlers ---
-        # We also remove the scheduler from the handlers' dependencies for now
         handlers = BotHandlers(bot, github_api, db_manager, summarizer, scheduler_manager)
         handlers.register_handlers()
 
         # --- Pass the notifier to the monitor ---
         monitor = RepositoryMonitor(bot, github_api, db_manager, notifier)
 
-        # --- Start the digest scheduler (renamed variable to avoid confusion) ---
+        # --- Start the digest scheduler ---
         scheduler_manager.start()
 
-        monitor_task = asyncio.create_task(monitor.start_monitoring())
+        # --- MODIFIED: Start monitoring loops as separate tasks ---
+        monitor.start_monitoring()  # This just sets the flag to True
+
+        stars_monitor_task = asyncio.create_task(
+            monitor.stars_monitoring_loop(interval=config.STARS_MONITOR_INTERVAL)
+        )
+        releases_monitor_task = asyncio.create_task(
+            monitor.releases_monitoring_loop(interval=config.RELEASES_MONITOR_INTERVAL)
+        )
+        logger.info(f"Stars (interval: {config.STARS_MONITOR_INTERVAL}s) and Releases (interval: {config.RELEASES_MONITOR_INTERVAL}s) monitoring tasks started.")
+        # --- End of modification ---
 
         logger.info("Personal GitHub Stars Bot started successfully!")
         await bot.infinity_polling(logger_level=logging.INFO)
@@ -91,16 +102,22 @@ async def main():
         logger.error(f"A critical error occurred during bot startup or runtime: {e}", exc_info=True)
     finally:
         logger.info("Bot is stopping...")
-        if monitor_task and not monitor_task.done():
-            monitor_task.cancel()
-            logger.info("Monitoring task has been cancelled.")
         
-        # --- Updated scheduler shutdown check ---
-        if 'scheduler_manager' in locals() and scheduler_manager.scheduler.running:
+        # --- MODIFIED: Cancel the two new tasks ---
+        if stars_monitor_task and not stars_monitor_task.done():
+            stars_monitor_task.cancel()
+            logger.info("Stars monitoring task has been cancelled.")
+        
+        if releases_monitor_task and not releases_monitor_task.done():
+            releases_monitor_task.cancel()
+            logger.info("Releases monitoring task has been cancelled.")
+        # --- End of modification ---
+        
+        if scheduler_manager and scheduler_manager.scheduler.running:
             scheduler_manager.scheduler.shutdown()
             logger.info("Digest scheduler has been shut down.")
         
-        if 'github_api' in locals() and github_api:
+        if github_api:
             await github_api.close()
             logger.info("GitHub API session has been closed.")
         logger.info("Bot has stopped.")
